@@ -1,0 +1,12 @@
+node_modules/
+target/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+**/pkg/
+.DS_Store
+.idea/
+.vscode/*.local.json

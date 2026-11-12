@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "defaultProfile": "web",
+  "profiles": {
+    "web": {
+      "description": "Example: the feature branch hosts a Vite development server.",
+      "setup": [
+        {
+          "argv": [
+            "corepack",
+            "pnpm",
+            "install",
+            "--frozen-lockfile"
+          ]
+        }
+      ],
+      "verify": [
+        {
+          "argv": [
+            "corepack",
+            "pnpm",
+            "build"
+          ]
+        }
+      ],
+      "run": [
+        {
+          "argv": [
+            "corepack",
+            "pnpm",
+            "dev"
+          ],
+          "cwd": ".",
+          "platform": "all"
+        }
+      ]
+    },
+    "rust-core": {
+      "description": "Example: build/check a Rust workspace; no long-running server.",
+      "setup": [
+        {
+          "argv": [
+            "cargo",
+            "fetch"
+          ]
+        }
+      ],
+      "verify": [
+        {
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace"
+          ]
+        }
+      ],
+      "run": []
+    },
+    "linux-compose": {
+      "description": "Example: container services used only on a Linux branch/profile.",
+      "setup": [],
+      "verify": [
+        {
+          "argv": [
+            "docker",
+            "compose",
+            "config",
+            "--quiet"
+          ],
+          "platform": "linux"
+        }
+      ],
+      "run": [
+        {
+          "argv": [
+            "docker",
+            "compose",
+            "up"
+          ],
+          "platform": "linux"
+        }
+      ]
+    }
+  }
+}

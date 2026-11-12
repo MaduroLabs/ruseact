@@ -1,0 +1,28 @@
+name: Skill and toolchain checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: python3 scripts/validate_skills.py
+      - name: Branch resume helper smoke test
+        run: |
+          python3 .agents/skills/ruseact-branch-resume/scripts/resume.py status
+          python3 .agents/skills/ruseact-branch-resume/scripts/resume.py plan
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+      - name: Test Rust workspace when initialized
+        shell: bash
+        run: |
+          if test -f Cargo.toml; then cargo test --workspace --locked; else echo "SKIP: Cargo.toml not created"; fi

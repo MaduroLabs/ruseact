@@ -8,7 +8,8 @@ GitHub is the source of truth for tracked code, skills, architecture notes, and 
 2. `rust-toolchain.toml` pins Rust and the WASM target for both machines; verify `rustup show`.
 3. Keep both **independent clones as siblings** named `ruseact/` and `ruseact-examples/`.
 4. Run `python3 scripts/validate_skills.py` to verify agent skill structure.
-5. Once package manifests exist, use frozen installs in CI (`pnpm install --frozen-lockfile`) and check in a lockfile. Use `cargo test --workspace` for Rust and add browser/WASM tests when supported.
+5. The workspace pins pnpm to `12.16.1` in the root `package.json`; use Corepack or an equivalent version manager to activate it.
+6. Use frozen installs in CI (`pnpm install --frozen-lockfile`) and check in `pnpm-lock.yaml`. Run `pnpm typecheck` for TypeScript and `cargo test --workspace --locked` for Rust.
 
 ## Example repo integration
 - When `ruseact` changes public behavior, prepare a matching change in the separate `ruseact-examples` repository; include the example PR link in the library PR.

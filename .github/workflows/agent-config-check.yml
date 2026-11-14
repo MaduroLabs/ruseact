@@ -1,10 +1,14 @@
-name: Skill and toolchain checks
+name: Ruseact CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
+permissions:
+  contents: read
+
 jobs:
-  check:
+  rust:
+    name: Rust (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -12,17 +16,49 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --locked
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test workspace
+        run: cargo test --workspace --locked
+      - name: Check WASM target
+        run: cargo check --workspace --target wasm32-unknown-unknown --locked
+
+  typescript:
+    name: TypeScript (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.16.1
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      - run: python3 scripts/validate_skills.py
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: TypeScript checks
+        run: pnpm typecheck
+
+  skills:
+    name: Skill validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate skills
+        run: python3 scripts/validate_skills.py
       - name: Branch resume helper smoke test
         run: |
           python3 .agents/skills/ruseact-branch-resume/scripts/resume.py status
           python3 .agents/skills/ruseact-branch-resume/scripts/resume.py plan
-      - name: Rust toolchain
-        run: rustup show active-toolchain
-      - name: Test Rust workspace when initialized
-        shell: bash
-        run: |
-          if test -f Cargo.toml; then cargo test --workspace --locked; else echo "SKIP: Cargo.toml not created"; fi

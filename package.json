@@ -1,0 +1,16 @@
+{
+  "name": "ruseact-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=24.22.3 <25",
+    "pnpm": ">=12.16.1 <13"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

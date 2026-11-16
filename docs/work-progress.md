@@ -4,7 +4,7 @@
 
 - Branch: `feature/m1-reactive-core`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Last verified on: Linux x86_64, 2026-11-16 for M1.1; M0 baseline was verified on macOS Apple Silicon, 2026-11-14
+- Last verified on: Linux x86_64, 2026-11-16 for M1.2; M0 baseline was verified on macOS Apple Silicon, 2026-11-14
 
 ## Completed
 
@@ -17,10 +17,13 @@
 - [x] Implemented M1.1 signal storage with typed handles, graph-scoped generational node IDs, equality-aware writes, and explicit disposal.
 - [x] Added deterministic Rust unit tests for initialization, create/read/write, unchanged values, stale handles, cross-graph misuse, type mismatch, slot reuse, and generation exhaustion.
 - [x] Documented M1.1 ownership, equality, graph identity, generation exhaustion, and lifecycle decisions in `docs/architecture.md`.
+- [x] Implemented M1.2 graph-scoped generational computation IDs with explicit bidirectional dependency metadata.
+- [x] Added idempotent subscribe/unsubscribe, duplicate-free dependency replacement, signal/computation disposal cleanup, and stale/cross-graph validation.
+- [x] Documented M1.2 dependency ownership and compiler-assisted tracking boundary in `docs/architecture.md`.
 
 ## In progress / next
 
-- [ ] Define subscriptions, dirty propagation, and batching invariants in the next milestone.
+- [ ] Define dirty propagation, batching, and scheduling invariants in the next milestone.
 - [ ] Specify the Rust-to-JavaScript ABI before adding WASM exports.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -29,8 +32,8 @@
 
 - `cargo fmt --all -- --check` — PASS (Linux; Rust `1.99.0`).
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` — PASS (Linux; Rust `1.99.0`).
-- `cargo test -p ruseact-core --locked` — PASS; 8 core unit tests, 0 doc tests (Linux; Rust `1.99.0`).
-- `cargo test --workspace --locked` — PASS; 8 core tests, 0 WASM tests, 0 doc tests (Linux; Rust `1.99.0`).
+- `cargo test -p ruseact-core --locked` — PASS; 15 core unit tests, 0 doc tests (Linux; Rust `1.99.0`).
+- `cargo test --workspace --locked` — PASS; 15 core tests, 0 WASM tests, 0 doc tests (Linux; Rust `1.99.0`).
 - `cargo check --workspace --target wasm32-unknown-unknown --locked` — PASS (Linux; Rust `1.99.0`).
 
 - `pnpm install --lockfile-only` — PASS (macOS Apple Silicon; pnpm `12.16.1`).

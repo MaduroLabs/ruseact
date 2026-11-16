@@ -1,7 +1,8 @@
 # Ruseact architecture decisions
 
-This document records the M0 foundation decisions. It describes boundaries and
-constraints, not completed runtime behavior.
+This document records the M0 foundation and M1.1 signal decisions. It describes
+architecture boundaries, constraints, and the runtime contracts completed so
+far.
 
 ## Decision 1: RustReactiveCore is the reactive engine
 
@@ -47,3 +48,35 @@ once the packages have buildable output.
   `12.16.1`; `pnpm-lock.yaml` is checked in and CI uses frozen installs.
 - CI runs Rust and TypeScript checks on both Ubuntu and macOS. Skill structure
   validation runs as a separate required check.
+
+## Decision 6: M1.1 signal foundation
+
+M1.1 introduces the smallest graph-owned signal API in
+`crates/ruseact-core`: `ReactiveGraph::create_signal`, `ReactiveGraph::read`,
+`ReactiveGraph::set`, and explicit disposal. `Signal<T>` is a typed,
+copyable, non-owning handle; the graph owns the value and its lifecycle. The
+core does not infer ownership from a handle drop, and it does not expose
+component, hook, or renderer concepts.
+
+`NodeId` contains a process-local `GraphId`, a `u32` slot index, and a `u32`
+generation. `GraphId` is allocated atomically when a `ReactiveGraph` is
+created, so two graphs cannot have colliding node identities even when both
+use the same slot index and generation. `read`, `set`, `dispose`, and the
+public `dispose_node` API reject a node whose `GraphId` belongs to another
+graph with `SignalError::InvalidNode` before looking up a slot.
+
+A disposed slot increments its generation before it can be reused, so an old
+handle is rejected instead of reading or writing a replacement value.
+Generations do not wrap: a slot whose generation reaches `u32::MAX` is retired
+rather than reused. `ReactiveGraph::try_new` exposes graph-ID allocation
+exhaustion as `GraphError::IdExhausted`; `ReactiveGraph::new` remains the
+convenience constructor and panics only when that process-wide ID space is
+exhausted.
+
+Signal values are type-erased inside the heterogeneous graph and require
+`'static` storage. Signal creation and writes require `PartialEq`. `set`
+returns `SignalUpdate::Changed` only when the new value is unequal, otherwise
+it returns `SignalUpdate::Unchanged` and leaves the stored value untouched.
+No subscribers, dirty queue, batching, callbacks, mutation intents, or WASM
+exports are part of M1.1; later milestones must define those semantics before
+adding them.

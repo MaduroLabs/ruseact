@@ -1,8 +1,8 @@
 # Ruseact architecture decisions
 
-This document records the M0 foundation, M1.1 signal, and M1.2 dependency
-decisions. It describes architecture boundaries, constraints, and the runtime
-contracts completed so far.
+This document records the M0 foundation, M1.1 signal, M1.2 dependency, and
+M1.3 dirty-propagation decisions. It describes architecture boundaries,
+constraints, and the runtime contracts completed so far.
 
 ## Decision 1: RustReactiveCore is the reactive engine
 
@@ -108,3 +108,34 @@ slice because a computation may depend on signals of different Rust types;
 this also leaves a small identity-level boundary for future compiler-assisted
 dynamic tracking. Automatic tracking, dirty propagation, scheduling, callback
 execution, and WASM exports remain outside M1.2.
+
+## Decision 8: M1.3 deterministic dirty propagation
+
+M1.3 connects M1.1 equality-aware writes to M1.2 subscriber metadata without
+adding computation execution. A changed `ReactiveGraph::set` copies the live
+subscriber IDs of that signal and marks them dirty. An equal write returns
+`SignalUpdate::Unchanged` and does not mark or enqueue any computation.
+
+The graph owns one ordered pending queue and one dirty bit per live
+computation. A computation is appended only on its first dirty transition, so
+multiple changed signals or multiple writes before a drain produce one queue
+entry. Queue order is deterministic: it is the order in which computations are
+first marked dirty, which follows signal write order and each signal's stable
+subscriber insertion order. `ReactiveGraph::drain_pending_computations` removes
+the queue, clears the dirty state for the returned live IDs, and returns the
+IDs without executing callbacks, bodies, DOM work, or JavaScript.
+
+The drain is the explicit coalescing boundary for M1.3. A changed signal after
+draining may enqueue the same computation again; an equal write after draining
+does not. Dependency edits and signal disposal clean up graph edges but do not
+cancel already-pending work for a still-live computation, because pending work
+is an identity-level notification rather than a subscription edge. Disposing
+a computation does cancel its queued ID before its generation can be reused, so
+draining never returns stale computation work. All internal enqueue and drain
+paths validate graph identity and computation generation, preserving
+cross-graph isolation and generational safety.
+
+M1.3 has no automatic flush, priority, batching API, concurrent execution,
+callback invocation, mutation intent, WASM ABI, compiler integration, or DOM
+behavior. Those concerns remain later milestones; in particular, M1.4 must
+define batching separately rather than being inferred from this queue.

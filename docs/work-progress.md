@@ -4,7 +4,7 @@
 
 - Branch: `feature/m1-reactive-core`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Last verified on: Linux x86_64, 2026-11-16 for M1.2; M0 baseline was verified on macOS Apple Silicon, 2026-11-14
+- Last verified on: macOS Apple Silicon, 2026-11-17 for M1.3; M1.2 was verified on Linux x86_64, 2026-11-16; M0 baseline was verified on macOS Apple Silicon, 2026-11-14
 
 ## Completed
 
@@ -20,10 +20,13 @@
 - [x] Implemented M1.2 graph-scoped generational computation IDs with explicit bidirectional dependency metadata.
 - [x] Added idempotent subscribe/unsubscribe, duplicate-free dependency replacement, signal/computation disposal cleanup, and stale/cross-graph validation.
 - [x] Documented M1.2 dependency ownership and compiler-assisted tracking boundary in `docs/architecture.md`.
+- [x] Implemented M1.3 changed-signal dirty propagation with deterministic first-dirtied ordering, queue deduplication, explicit draining, and computation disposal cleanup.
+- [x] Added deterministic M1.3 tests for propagation, unchanged writes, repeated changes, drain boundaries, subscription cleanup, graph isolation, invalid handles, and generational computation reuse.
+- [x] Documented M1.3 queue ownership, ordering, disposal, and deferred execution/batching decisions in `docs/architecture.md`.
 
 ## In progress / next
 
-- [ ] Define dirty propagation, batching, and scheduling invariants in the next milestone.
+- [ ] Define M1.4 batching invariants separately; do not infer batching or execution from the M1.3 dirty queue.
 - [ ] Specify the Rust-to-JavaScript ABI before adding WASM exports.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -41,6 +44,12 @@
 - `pnpm typecheck` — PASS (macOS Apple Silicon; host Node `22.23.2`; CI uses `.nvmrc` Node `24.22.3`).
 - `python3 scripts/validate_skills.py` — PASS; 6 skills validated.
 - `git diff --check` — PASS.
+
+- `cargo fmt --all` and `cargo fmt --all -- --check` — PASS (macOS Apple Silicon; Rust `1.99.0`, M1.3).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` — PASS (macOS Apple Silicon; Rust `1.99.0`, M1.3).
+- `cargo test -p ruseact-core --locked` — PASS; 21 core unit tests, 0 doc tests (macOS Apple Silicon; Rust `1.99.0`, M1.3).
+- `cargo test --workspace --locked` — PASS; 21 core tests, 0 WASM tests, 0 doc tests (macOS Apple Silicon; Rust `1.99.0`, M1.3).
+- `cargo check --workspace --target wasm32-unknown-unknown --locked` — PASS (macOS Apple Silicon; Rust `1.99.0`, M1.3).
 
 ## Blockers / decisions
 

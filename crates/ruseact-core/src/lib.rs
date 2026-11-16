@@ -91,6 +91,34 @@ impl NodeId {
     }
 }
 
+/// A stable, graph-scoped identity for a registered computation.
+///
+/// Computations are represented by metadata only in M1.2. The ID is the
+/// handle used to register dependencies and does not execute any callback.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ComputationId {
+    graph_id: GraphId,
+    index: u32,
+    generation: u32,
+}
+
+impl ComputationId {
+    /// Returns the graph that owns this computation.
+    pub const fn graph_id(self) -> GraphId {
+        self.graph_id
+    }
+
+    /// Returns the computation slot index portion of this identifier.
+    pub const fn index(self) -> u32 {
+        self.index
+    }
+
+    /// Returns the computation lifetime generation portion of this identifier.
+    pub const fn generation(self) -> u32 {
+        self.generation
+    }
+}
+
 /// A typed, non-owning handle to a signal stored in a [`ReactiveGraph`].
 ///
 /// Signals are copyable handles. The graph owns the value and its lifecycle;
@@ -184,9 +212,40 @@ impl fmt::Display for SignalError {
 
 impl std::error::Error for SignalError {}
 
+/// Errors returned when dependency metadata cannot be updated safely.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DependencyError {
+    /// The signal handle is stale, disposed, out of range, or belongs to
+    /// another graph.
+    InvalidSignal(NodeId),
+    /// The computation handle is stale, disposed, out of range, or belongs
+    /// to another graph.
+    InvalidComputation(ComputationId),
+    /// The graph cannot allocate another computation slot because its `u32`
+    /// computation index space is exhausted.
+    ComputationIdExhausted,
+}
+
+impl fmt::Display for DependencyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSignal(node_id) => {
+                write!(formatter, "invalid signal {node_id:?}")
+            }
+            Self::InvalidComputation(computation_id) => {
+                write!(formatter, "invalid computation {computation_id:?}")
+            }
+            Self::ComputationIdExhausted => formatter.write_str("computation ID space exhausted"),
+        }
+    }
+}
+
+impl std::error::Error for DependencyError {}
+
 struct NodeSlot {
     generation: u32,
     value: Option<Box<dyn Any>>,
+    subscribers: Vec<ComputationId>,
 }
 
 impl NodeSlot {
@@ -194,21 +253,40 @@ impl NodeSlot {
         Self {
             generation,
             value: None,
+            subscribers: Vec::new(),
+        }
+    }
+}
+
+struct ComputationSlot {
+    generation: u32,
+    dependencies: Option<Vec<NodeId>>,
+}
+
+impl ComputationSlot {
+    fn vacant(generation: u32) -> Self {
+        Self {
+            generation,
+            dependencies: None,
         }
     }
 }
 
 /// The graph-owned storage for signals and their generational identities.
 ///
-/// M1.1 deliberately models only signal storage and lifecycle. It does not
-/// schedule subscribers, flush a dirty queue, execute callbacks, or create
-/// mutation intents. Those behaviors will be added by later milestones with
-/// separate invariants and tests.
+/// M1.2 models signal storage, computation identities, and explicit
+/// bidirectional dependency metadata. It does not schedule subscribers, flush
+/// a dirty queue, execute callbacks, or create mutation intents. Those
+/// behaviors will be added by later milestones with separate invariants and
+/// tests.
 pub struct ReactiveGraph {
     graph_id: GraphId,
     slots: Vec<NodeSlot>,
     free_slots: Vec<u32>,
     active_nodes: usize,
+    computation_slots: Vec<ComputationSlot>,
+    free_computation_slots: Vec<u32>,
+    active_computations: usize,
 }
 
 impl ReactiveGraph {
@@ -220,6 +298,9 @@ impl ReactiveGraph {
             slots: Vec::new(),
             free_slots: Vec::new(),
             active_nodes: 0,
+            computation_slots: Vec::new(),
+            free_computation_slots: Vec::new(),
+            active_computations: 0,
         })
     }
 
@@ -245,6 +326,37 @@ impl ReactiveGraph {
     /// Returns whether this graph owns no live nodes.
     pub const fn is_empty(&self) -> bool {
         self.active_nodes == 0
+    }
+
+    /// Registers an empty computation metadata record.
+    ///
+    /// A computation has no executable body in M1.2. Its generational ID is
+    /// used only to maintain explicit signal dependency edges.
+    pub fn create_computation(&mut self) -> Result<ComputationId, DependencyError> {
+        let (index, generation) = match self.free_computation_slots.pop() {
+            Some(index) => {
+                let slot = &self.computation_slots[index as usize];
+                debug_assert!(slot.dependencies.is_none());
+                (index, slot.generation)
+            }
+            None => {
+                let index = u32::try_from(self.computation_slots.len())
+                    .map_err(|_| DependencyError::ComputationIdExhausted)?;
+                self.computation_slots.push(ComputationSlot::vacant(0));
+                (index, 0)
+            }
+        };
+
+        let slot = &mut self.computation_slots[index as usize];
+        debug_assert!(slot.dependencies.is_none());
+        slot.dependencies = Some(Vec::new());
+        self.active_computations += 1;
+
+        Ok(ComputationId {
+            graph_id: self.graph_id,
+            index,
+            generation,
+        })
     }
 
     /// Creates a signal with an initial value.
@@ -281,6 +393,150 @@ impl ReactiveGraph {
             index,
             generation,
         }))
+    }
+
+    /// Adds a signal-to-computation dependency edge.
+    ///
+    /// Returns `true` when a new edge was added and `false` when the edge was
+    /// already present. No dirty state or scheduling work is produced.
+    pub fn subscribe<T>(
+        &mut self,
+        signal: Signal<T>,
+        computation: ComputationId,
+    ) -> Result<bool, DependencyError> {
+        let node_id = signal.id();
+        let signal_index = self.signal_index_for_dependency(node_id)?;
+        let computation_index = self.computation_index(computation)?;
+        let signal_has_edge = self.slots[signal_index].subscribers.contains(&computation);
+        let computation_has_edge = self.computation_slots[computation_index]
+            .dependencies
+            .as_ref()
+            .expect("validated computation must have dependencies")
+            .contains(&node_id);
+
+        debug_assert_eq!(signal_has_edge, computation_has_edge);
+
+        if !signal_has_edge {
+            self.slots[signal_index].subscribers.push(computation);
+        }
+        if !computation_has_edge {
+            self.computation_slots[computation_index]
+                .dependencies
+                .as_mut()
+                .expect("validated computation must have dependencies")
+                .push(node_id);
+        }
+
+        Ok(!signal_has_edge)
+    }
+
+    /// Removes a signal-to-computation dependency edge.
+    ///
+    /// Returns `true` when an edge was removed and `false` when no edge was
+    /// present. Repeated unsubscription is therefore safe and idempotent.
+    pub fn unsubscribe<T>(
+        &mut self,
+        signal: Signal<T>,
+        computation: ComputationId,
+    ) -> Result<bool, DependencyError> {
+        let node_id = signal.id();
+        let signal_index = self.signal_index_for_dependency(node_id)?;
+        let computation_index = self.computation_index(computation)?;
+        let signal_had_edge = self.slots[signal_index].subscribers.contains(&computation);
+        let computation_had_edge = self.computation_slots[computation_index]
+            .dependencies
+            .as_ref()
+            .expect("validated computation must have dependencies")
+            .contains(&node_id);
+
+        self.slots[signal_index]
+            .subscribers
+            .retain(|subscriber| *subscriber != computation);
+        self.computation_slots[computation_index]
+            .dependencies
+            .as_mut()
+            .expect("validated computation must have dependencies")
+            .retain(|dependency| *dependency != node_id);
+
+        debug_assert_eq!(signal_had_edge, computation_had_edge);
+        Ok(signal_had_edge || computation_had_edge)
+    }
+
+    /// Replaces all dependencies of a computation with a validated set.
+    ///
+    /// Duplicate signal IDs are ignored while preserving the first-seen
+    /// order. Every requested signal is validated before any existing edge is
+    /// removed, so an invalid replacement leaves the graph unchanged.
+    pub fn replace_dependencies(
+        &mut self,
+        computation: ComputationId,
+        dependencies: &[NodeId],
+    ) -> Result<(), DependencyError> {
+        let computation_index = self.computation_index(computation)?;
+        let mut next_dependencies = Vec::with_capacity(dependencies.len());
+
+        for &node_id in dependencies {
+            self.signal_index_for_dependency(node_id)?;
+            if !next_dependencies.contains(&node_id) {
+                next_dependencies.push(node_id);
+            }
+        }
+
+        let previous_dependencies = self.computation_slots[computation_index]
+            .dependencies
+            .as_ref()
+            .expect("validated computation must have dependencies")
+            .clone();
+
+        for node_id in previous_dependencies {
+            self.remove_subscriber(node_id, computation);
+        }
+        for &node_id in &next_dependencies {
+            self.add_subscriber(node_id, computation);
+        }
+        self.computation_slots[computation_index].dependencies = Some(next_dependencies);
+
+        Ok(())
+    }
+
+    /// Disposes a computation and removes all of its dependency edges.
+    pub fn dispose_computation(
+        &mut self,
+        computation: ComputationId,
+    ) -> Result<(), DependencyError> {
+        let computation_index = self.computation_index(computation)?;
+        let dependencies = self.computation_slots[computation_index]
+            .dependencies
+            .as_ref()
+            .expect("validated computation must have dependencies")
+            .clone();
+
+        for node_id in dependencies {
+            self.remove_subscriber(node_id, computation);
+        }
+
+        let reusable = {
+            let slot = &mut self.computation_slots[computation_index];
+            let _ = slot
+                .dependencies
+                .take()
+                .expect("validated computation must have dependencies");
+
+            match slot.generation.checked_add(1) {
+                Some(next_generation) => {
+                    slot.generation = next_generation;
+                    true
+                }
+                None => false,
+            }
+        };
+
+        self.active_computations -= 1;
+        if reusable {
+            self.free_computation_slots.push(computation.index);
+        }
+
+        Ok(())
     }
 
     /// Reads a signal value by reference.
@@ -339,18 +595,25 @@ impl ReactiveGraph {
 
     /// Disposes a live node by its generational identity.
     pub fn dispose_node(&mut self, node_id: NodeId) -> Result<(), SignalError> {
-        let reusable = {
+        let (reusable, subscribers) = {
             let slot = self.slot_mut(node_id)?;
+            let subscribers = std::mem::take(&mut slot.subscribers);
             let _ = slot.value.take().ok_or(SignalError::InvalidNode(node_id))?;
 
-            match slot.generation.checked_add(1) {
+            let reusable = match slot.generation.checked_add(1) {
                 Some(next_generation) => {
                     slot.generation = next_generation;
                     true
                 }
                 None => false,
-            }
+            };
+
+            (reusable, subscribers)
         };
+
+        for computation in subscribers {
+            self.remove_dependency(computation, node_id);
+        }
 
         self.active_nodes -= 1;
         if reusable {
@@ -358,6 +621,59 @@ impl ReactiveGraph {
         }
 
         Ok(())
+    }
+
+    fn signal_index_for_dependency(&self, node_id: NodeId) -> Result<usize, DependencyError> {
+        self.slot(node_id)
+            .map(|_| node_id.index as usize)
+            .map_err(|_| DependencyError::InvalidSignal(node_id))
+    }
+
+    fn computation_index(&self, computation: ComputationId) -> Result<usize, DependencyError> {
+        if computation.graph_id != self.graph_id {
+            return Err(DependencyError::InvalidComputation(computation));
+        }
+
+        let index = computation.index as usize;
+        let slot = self
+            .computation_slots
+            .get(index)
+            .ok_or(DependencyError::InvalidComputation(computation))?;
+
+        if slot.generation != computation.generation || slot.dependencies.is_none() {
+            return Err(DependencyError::InvalidComputation(computation));
+        }
+
+        Ok(index)
+    }
+
+    fn add_subscriber(&mut self, node_id: NodeId, computation: ComputationId) {
+        if let Some(slot) = self.slots.get_mut(node_id.index as usize) {
+            debug_assert_eq!(node_id.graph_id, self.graph_id);
+            debug_assert_eq!(slot.generation, node_id.generation);
+            if !slot.subscribers.contains(&computation) {
+                slot.subscribers.push(computation);
+            }
+        }
+    }
+
+    fn remove_subscriber(&mut self, node_id: NodeId, computation: ComputationId) {
+        if let Some(slot) = self.slots.get_mut(node_id.index as usize) {
+            debug_assert_eq!(node_id.graph_id, self.graph_id);
+            debug_assert_eq!(slot.generation, node_id.generation);
+            slot.subscribers
+                .retain(|subscriber| *subscriber != computation);
+        }
+    }
+
+    fn remove_dependency(&mut self, computation: ComputationId, node_id: NodeId) {
+        if let Some(slot) = self.computation_slots.get_mut(computation.index as usize) {
+            debug_assert_eq!(computation.graph_id, self.graph_id);
+            debug_assert_eq!(slot.generation, computation.generation);
+            if let Some(dependencies) = slot.dependencies.as_mut() {
+                dependencies.retain(|dependency| *dependency != node_id);
+            }
+        }
     }
 
     fn slot(&self, node_id: NodeId) -> Result<&NodeSlot, SignalError> {
@@ -476,6 +792,236 @@ mod tests {
         assert_eq!(replacement_id.generation(), first_id.generation() + 1);
         assert_eq!(graph.read(first), Err(SignalError::InvalidNode(first_id)));
         assert_eq!(graph.read(replacement), Ok(&"replacement"));
+    }
+
+    #[test]
+    fn computations_have_graph_scoped_generational_ids() {
+        let mut graph = ReactiveGraph::new();
+        let computation = graph.create_computation().unwrap();
+
+        assert_eq!(computation.graph_id(), graph.graph_id());
+        assert_eq!(computation.index(), 0);
+        assert_eq!(computation.generation(), 0);
+        assert_eq!(graph.active_computations, 1);
+    }
+
+    #[test]
+    fn disposed_computation_slots_reuse_index_with_a_new_generation() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(1_u32).unwrap();
+        let first = graph.create_computation().unwrap();
+
+        graph.dispose_computation(first).unwrap();
+        let replacement = graph.create_computation().unwrap();
+
+        assert_eq!(replacement.index(), first.index());
+        assert_eq!(replacement.generation(), first.generation() + 1);
+        assert_eq!(
+            graph.subscribe(signal, first),
+            Err(DependencyError::InvalidComputation(first))
+        );
+        assert_eq!(graph.subscribe(signal, replacement), Ok(true));
+    }
+
+    #[test]
+    fn multiple_dependencies_are_registered_in_both_directions() {
+        let mut graph = ReactiveGraph::new();
+        let first = graph.create_signal(1_u32).unwrap();
+        let second = graph.create_signal(2_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+
+        assert_eq!(graph.subscribe(first, computation), Ok(true));
+        assert_eq!(graph.subscribe(second, computation), Ok(true));
+        assert_eq!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref(),
+            Some(&vec![first.id(), second.id()])
+        );
+        assert_eq!(
+            graph.slots[first.id().index() as usize].subscribers,
+            vec![computation]
+        );
+        assert_eq!(
+            graph.slots[second.id().index() as usize].subscribers,
+            vec![computation]
+        );
+    }
+
+    #[test]
+    fn duplicate_subscriptions_and_unsubscriptions_are_idempotent() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(1_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+
+        assert_eq!(graph.subscribe(signal, computation), Ok(true));
+        assert_eq!(graph.subscribe(signal, computation), Ok(false));
+        assert_eq!(
+            graph.slots[signal.id().index() as usize].subscribers,
+            vec![computation]
+        );
+        assert_eq!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref(),
+            Some(&vec![signal.id()])
+        );
+
+        assert_eq!(graph.unsubscribe(signal, computation), Ok(true));
+        assert_eq!(graph.unsubscribe(signal, computation), Ok(false));
+        assert!(
+            graph.slots[signal.id().index() as usize]
+                .subscribers
+                .is_empty()
+        );
+        assert!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn dependency_replacement_deduplicates_and_removes_old_edges() {
+        let mut graph = ReactiveGraph::new();
+        let first = graph.create_signal(1_u32).unwrap();
+        let second = graph.create_signal(2_u32).unwrap();
+        let third = graph.create_signal(3_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+
+        graph
+            .replace_dependencies(computation, &[first.id(), second.id(), first.id()])
+            .unwrap();
+        assert_eq!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref(),
+            Some(&vec![first.id(), second.id()])
+        );
+
+        graph
+            .replace_dependencies(computation, &[second.id(), third.id(), second.id()])
+            .unwrap();
+        assert_eq!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref(),
+            Some(&vec![second.id(), third.id()])
+        );
+        assert!(
+            graph.slots[first.id().index() as usize]
+                .subscribers
+                .is_empty()
+        );
+        assert_eq!(
+            graph.slots[second.id().index() as usize].subscribers,
+            vec![computation]
+        );
+        assert_eq!(
+            graph.slots[third.id().index() as usize].subscribers,
+            vec![computation]
+        );
+    }
+
+    #[test]
+    fn signal_and_computation_disposal_clean_up_both_directions() {
+        let mut graph = ReactiveGraph::new();
+        let first = graph.create_signal(1_u32).unwrap();
+        let second = graph.create_signal(2_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+
+        graph.subscribe(first, computation).unwrap();
+        graph.subscribe(second, computation).unwrap();
+        graph.dispose(first).unwrap();
+
+        assert_eq!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref(),
+            Some(&vec![second.id()])
+        );
+        assert!(
+            graph.slots[first.id().index() as usize]
+                .subscribers
+                .is_empty()
+        );
+        assert_eq!(
+            graph.slots[second.id().index() as usize].subscribers,
+            vec![computation]
+        );
+
+        graph.dispose_computation(computation).unwrap();
+        assert!(
+            graph.slots[second.id().index() as usize]
+                .subscribers
+                .is_empty()
+        );
+        assert_eq!(graph.active_computations, 0);
+        assert_eq!(
+            graph.dispose_computation(computation),
+            Err(DependencyError::InvalidComputation(computation))
+        );
+    }
+
+    #[test]
+    fn stale_and_cross_graph_dependency_handles_are_rejected() {
+        let mut source = ReactiveGraph::new();
+        let foreign_signal = source.create_signal(1_u32).unwrap();
+        let foreign_computation = source.create_computation().unwrap();
+
+        let mut target = ReactiveGraph::new();
+        let local_signal = target.create_signal(2_u32).unwrap();
+        let local_computation = target.create_computation().unwrap();
+        target.subscribe(local_signal, local_computation).unwrap();
+
+        assert_eq!(
+            target.subscribe(foreign_signal, local_computation),
+            Err(DependencyError::InvalidSignal(foreign_signal.id()))
+        );
+        assert_eq!(
+            target.subscribe(local_signal, foreign_computation),
+            Err(DependencyError::InvalidComputation(foreign_computation))
+        );
+        assert_eq!(
+            target.unsubscribe(foreign_signal, local_computation),
+            Err(DependencyError::InvalidSignal(foreign_signal.id()))
+        );
+        assert_eq!(
+            target.replace_dependencies(foreign_computation, &[local_signal.id()]),
+            Err(DependencyError::InvalidComputation(foreign_computation))
+        );
+        assert_eq!(
+            target.dispose_computation(foreign_computation),
+            Err(DependencyError::InvalidComputation(foreign_computation))
+        );
+        assert_eq!(
+            target.replace_dependencies(local_computation, &[foreign_signal.id()]),
+            Err(DependencyError::InvalidSignal(foreign_signal.id()))
+        );
+        assert_eq!(
+            target.computation_slots[local_computation.index() as usize]
+                .dependencies
+                .as_ref(),
+            Some(&vec![local_signal.id()])
+        );
+
+        target.dispose(local_signal).unwrap();
+        target.dispose_computation(local_computation).unwrap();
+        let replacement_signal = target.create_signal(3_u32).unwrap();
+        assert_eq!(
+            target.subscribe(replacement_signal, local_computation),
+            Err(DependencyError::InvalidComputation(local_computation))
+        );
+        assert_eq!(
+            target.subscribe(local_signal, foreign_computation),
+            Err(DependencyError::InvalidSignal(local_signal.id()))
+        );
+        assert_eq!(
+            target.subscribe(foreign_signal, local_computation),
+            Err(DependencyError::InvalidSignal(foreign_signal.id()))
+        );
     }
 
     #[test]

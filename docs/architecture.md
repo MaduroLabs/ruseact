@@ -111,8 +111,9 @@ execution, and WASM exports remain outside M1.2.
 
 ## Decision 8: M1.3 deterministic dirty propagation
 
-M1.3 connects M1.1 equality-aware writes to M1.2 subscriber metadata without
-adding computation execution. A changed `ReactiveGraph::set` copies the live
+The implementation on `feature/m1.3-dirty-propagation` connects M1.1
+equality-aware writes to M1.2 subscriber metadata without adding computation
+execution. A changed `ReactiveGraph::set` copies the live
 subscriber IDs of that signal and marks them dirty. An equal write returns
 `SignalUpdate::Unchanged` and does not mark or enqueue any computation.
 

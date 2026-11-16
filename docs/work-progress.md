@@ -2,7 +2,7 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m1-reactive-core`
+- Branch: `feature/m1.3-dirty-propagation`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
 - Last verified on: macOS Apple Silicon, 2026-11-17 for M1.3; M1.2 was verified on Linux x86_64, 2026-11-16; M0 baseline was verified on macOS Apple Silicon, 2026-11-14
 
@@ -45,7 +45,7 @@
 - `python3 scripts/validate_skills.py` — PASS; 6 skills validated.
 - `git diff --check` — PASS.
 
-- `cargo fmt --all` and `cargo fmt --all -- --check` — PASS (macOS Apple Silicon; Rust `1.99.0`, M1.3).
+- `cargo fmt --all -- --check` — PASS (macOS Apple Silicon; Rust `1.99.0`, M1.3).
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` — PASS (macOS Apple Silicon; Rust `1.99.0`, M1.3).
 - `cargo test -p ruseact-core --locked` — PASS; 21 core unit tests, 0 doc tests (macOS Apple Silicon; Rust `1.99.0`, M1.3).
 - `cargo test --workspace --locked` — PASS; 21 core tests, 0 WASM tests, 0 doc tests (macOS Apple Silicon; Rust `1.99.0`, M1.3).

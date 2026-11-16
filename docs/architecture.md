@@ -1,8 +1,8 @@
 # Ruseact architecture decisions
 
-This document records the M0 foundation and M1.1 signal decisions. It describes
-architecture boundaries, constraints, and the runtime contracts completed so
-far.
+This document records the M0 foundation, M1.1 signal, and M1.2 dependency
+decisions. It describes architecture boundaries, constraints, and the runtime
+contracts completed so far.
 
 ## Decision 1: RustReactiveCore is the reactive engine
 
@@ -80,3 +80,31 @@ it returns `SignalUpdate::Unchanged` and leaves the stored value untouched.
 No subscribers, dirty queue, batching, callbacks, mutation intents, or WASM
 exports are part of M1.1; later milestones must define those semantics before
 adding them.
+
+## Decision 7: M1.2 explicit dependency metadata
+
+M1.2 adds graph-owned computation metadata without adding computation bodies or
+execution. `ReactiveGraph::create_computation` returns a graph-scoped,
+generational `ComputationId`; the graph owns its metadata and disposal is
+explicit. A disposed computation slot increments its generation and a slot
+that reaches `u32::MAX` is retired. The explicit dependency API is
+`subscribe`, `unsubscribe`, `replace_dependencies`, and
+`dispose_computation`; none of these operations mark work dirty or invoke a
+callback.
+
+Each live signal stores its subscriber computation IDs, and each live
+computation stores its signal `NodeId` dependencies. The graph updates both
+directions together. Subscription and unsubscription are idempotent and return
+whether an edge was added or removed. Dependency replacement validates every
+requested signal before mutating the old set, removes duplicates while
+preserving first-seen order, and replaces both sides of the relationship.
+
+Disposing a signal removes that signal from every computation's dependency set;
+disposing a computation removes it from every signal's subscriber set. Both
+`GraphId` and generation are validated for every dependency operation, so
+foreign and stale signal or computation handles return `DependencyError`.
+`replace_dependencies` accepts `NodeId` values rather than one typed signal
+slice because a computation may depend on signals of different Rust types;
+this also leaves a small identity-level boundary for future compiler-assisted
+dynamic tracking. Automatic tracking, dirty propagation, scheduling, callback
+execution, and WASM exports remain outside M1.2.

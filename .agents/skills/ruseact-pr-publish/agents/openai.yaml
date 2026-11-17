@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ruseact PR Publish"
+  short_description: "Review, validate, push a feature branch, open PR to develop"
+  default_prompt: "Publish this completed Ruseact milestone as a reviewed PR targeting develop. Do not merge the PR."
+policy:
+  allow_implicit_invocation: false

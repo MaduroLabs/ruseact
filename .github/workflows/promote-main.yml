@@ -1,0 +1,170 @@
+name: Ruseact Promote Main
+
+on:
+  # A native GitHub squash merge creates this trusted close event.  The
+  # workflow never relies on a push event created by GITHUB_TOKEN.
+  pull_request_target:
+    branches: [develop]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Merged develop PR number for an authorized recovery"
+        required: true
+        type: string
+      merge_sha:
+        description: "Expected squash SHA; leave blank to retrieve it from GitHub"
+        required: false
+        type: string
+      confirm:
+        description: "Type PROMOTE to authorize the recovery workflow"
+        required: true
+        type: string
+
+# Promotion is performed by creating a verified PR to main.  This avoids a
+# direct protected-branch push and lets main's own ruleset enforce its checks.
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: write
+
+concurrency:
+  group: ruseact-main-promotion
+  cancel-in-progress: false
+
+jobs:
+  verify-and-promote:
+    name: Verify and promote one merged squash commit
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.policy.outputs.eligible }}
+      source_sha: ${{ steps.policy.outputs.source_sha }}
+      main_sha: ${{ steps.policy.outputs.main_sha }}
+      reason: ${{ steps.policy.outputs.reason }}
+    env:
+      PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || github.event.pull_request.number }}
+      EXPECTED_MERGE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.merge_sha || github.event.pull_request.merge_commit_sha }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Require explicit recovery confirmation
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: test "$CONFIRM" = "PROMOTE"
+
+      - name: Check out trusted develop policy
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Verify the merged PR and repository gates
+        id: policy
+        run: >-
+          python3 scripts/automation_gate.py
+          --mode promote
+          --pr-number "$PR_NUMBER"
+          --expected-merge-sha "$EXPECTED_MERGE_SHA"
+          --output "$GITHUB_OUTPUT"
+
+      - name: Record blocked or manual-required promotion
+        if: steps.policy.outputs.eligible != 'true'
+        env:
+          REASON: ${{ steps.policy.outputs.reason }}
+        run: |
+          echo "Promotion not performed: ${REASON:-no trusted decision}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch and verify remote tips
+        if: steps.policy.outputs.eligible == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.policy.outputs.source_sha }}
+          EXPECTED_MAIN_SHA: ${{ steps.policy.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin develop main --prune
+          test "$(git rev-parse origin/develop)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN_SHA"
+
+      - name: Detect an idempotent prior promotion
+        id: duplicate
+        if: steps.policy.outputs.eligible == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.policy.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          if git log origin/main --format='%B' | grep -Fq "cherry picked from commit ${SOURCE_SHA}"; then
+            echo "already_promoted=true" >> "$GITHUB_OUTPUT"
+            echo "The verified source SHA is already recorded on main." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already_promoted=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create a verified promotion branch and PR
+        if: steps.policy.outputs.eligible == 'true' && steps.duplicate.outputs.already_promoted != 'true'
+        id: promotion
+        env:
+          SOURCE_SHA: ${{ steps.policy.outputs.source_sha }}
+          MAIN_SHA: ${{ steps.policy.outputs.main_sha }}
+          PR_NUMBER: ${{ env.PR_NUMBER }}
+        run: |
+          set -euo pipefail
+          branch="automation/promote-${PR_NUMBER}-${SOURCE_SHA:0:12}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch"
+            existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state open --json number,headRefOid --jq '.[0]')"
+            test -n "$existing" || { echo "Promotion branch exists without an open PR; refusing to guess" >&2; exit 1; }
+            promotion_number="$(printf '%s' "$existing" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])')"
+          else
+            git switch --detach origin/main
+            git switch -c "$branch"
+            git cherry-pick -x "$SOURCE_SHA"
+            git diff --check
+            git push --set-upstream origin "$branch"
+            promotion_number="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" --title "promote: develop PR #${PR_NUMBER}" --body "Automated promotion of verified develop squash commit ${SOURCE_SHA}.\n\nSource PR: #${PR_NUMBER}\nSource branch: develop\nTarget branch: main\n\nThis PR was created by the trusted promotion workflow and must pass main's required checks.")"
+            promotion_number="${promotion_number##*/}"
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$promotion_number" >> "$GITHUB_OUTPUT"
+
+      - name: Request validation for the promotion PR
+        if: steps.policy.outputs.eligible == 'true' && steps.duplicate.outputs.already_promoted != 'true'
+        env:
+          BRANCH: ${{ steps.promotion.outputs.branch }}
+          MAIN_SHA: ${{ steps.policy.outputs.main_sha }}
+          SOURCE_SHA: ${{ steps.policy.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN-created pushes do not reliably create downstream
+          # workflow runs, so dispatch validation explicitly and poll only a
+          # bounded number of times.
+          promotion_head="$(git rev-parse "origin/$BRANCH")"
+          gh workflow run agent-config-check.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" \
+            -f base_sha="$MAIN_SHA" -f head_sha="$promotion_head"
+          for attempt in $(seq 1 12); do
+            run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow agent-config-check.yml --branch "$BRANCH" --limit 20 --json databaseId,headSha,status,conclusion --jq "map(select(.headSha == \"$promotion_head\")) | .[0]")"
+            if [ -n "$run" ] && [ "$run" != "null" ]; then
+              status="$(printf '%s' "$run" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+              conclusion="$(printf '%s' "$run" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("conclusion") or "")')"
+              if [ "$status" = "completed" ]; then
+                test "$conclusion" = "success" || { echo "Promotion validation failed: $conclusion" >&2; exit 1; }
+                break
+              fi
+            fi
+            test "$attempt" -lt 12 || { echo "Timed out waiting for promotion validation" >&2; exit 1; }
+            sleep 10
+          done
+
+      - name: Enable native squash auto-merge for the promotion PR
+        if: steps.policy.outputs.eligible == 'true' && steps.duplicate.outputs.already_promoted != 'true'
+        env:
+          PROMOTION_PR: ${{ steps.promotion.outputs.pr_number }}
+          PROMOTION_BRANCH: ${{ steps.promotion.outputs.branch }}
+        run: |
+          set -euo pipefail
+          expected_head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${PROMOTION_BRANCH}" --jq '.object.sha')"
+          actual_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PROMOTION_PR}" --jq '.head.sha')"
+          test "$expected_head" = "$actual_head" || { echo "Promotion PR changed after validation" >&2; exit 1; }
+          gh pr merge "$PROMOTION_PR" --repo "$GITHUB_REPOSITORY" --auto --squash

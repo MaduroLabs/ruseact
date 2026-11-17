@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from workflow_policy import (
     classify_paths,
@@ -16,6 +17,11 @@ from workflow_policy import (
 
 
 class WorkflowPolicyTests(unittest.TestCase):
+    def test_automatic_workflow_definitions_are_removed(self) -> None:
+        workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        self.assertFalse((workflow_dir / "auto-merge-develop.yml").exists())
+        self.assertFalse((workflow_dir / "promote-main.yml").exists())
+
     def test_high_risk_workflow_and_core_changes_require_review(self) -> None:
         risk, _ = classify_paths([".github/workflows/ci.yml", "crates/ruseact-core/src/lib.rs"])
         self.assertEqual(risk, "HIGH")

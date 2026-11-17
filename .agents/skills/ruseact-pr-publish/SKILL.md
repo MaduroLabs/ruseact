@@ -1,6 +1,6 @@
 ---
 name: ruseact-pr-publish
-description: Validate and publish a Ruseact task with mandatory README maintenance, trusted risk classification, and CI-gated squash auto-merge eligibility. Use only when the user explicitly asks to publish a task or create its PR; never merge high-risk work or promote main.
+description: Validate and publish a Ruseact task with mandatory README maintenance, trusted risk classification, and manual-approval PR publication. Use only when the user explicitly asks to publish a task or create its PR; never merge or promote it.
 ---
 # Publish a reviewed Ruseact feature branch to develop
 
@@ -12,11 +12,11 @@ branch push, and PR creation. It does not authorize merging this task,
 changing repository rulesets, changing Actions permissions, pushing `main`, or
 working in `ruseact-examples`.
 
-The trusted `.github/workflows/auto-merge-develop.yml` may request native
-squash auto-merge for an eligible low-risk PR after GitHub verifies enforced
-checks and reviews. This skill never enables auto-merge for high-risk work and
-never uses labels or PR text as a security decision. The current workflow
-configuration task is high risk and must remain pending explicit human review.
+Ruseact uses a strictly manual merge policy. The former
+`.github/workflows/auto-merge-develop.yml` is disabled and removed. This skill
+never invokes `gh pr merge`, never enables native auto-merge, and never treats
+CI success as merge authorization. Every task stops after opening its PR for
+human review and protected squash merge.
 
 Read `AGENTS.md`, `README.md`, `docs/development-workflow.md`, and relevant
 project documentation before acting. Follow stricter repository rules if they
@@ -91,24 +91,23 @@ The PR must not target `main`. Never push directly to `main`, merge the PR
 yourself, bypass branch protection, or change repository settings from this
 skill.
 
-## Phase D — CI-gated squash merge eligibility
+## Phase D — Manual approval and stop condition
 
-For a low-risk PR, the trusted workflow may enter `AUTO_MERGE_PENDING` only
-when all of the following are true:
+Every PR enters `MANUAL_APPROVAL_REQUIRED` after publication, regardless of
+risk classification. Before stopping, verify that:
 
-- the PR still targets `develop`, is not a draft, and has no conflict;
+- the PR targets `develop`, is not a draft, and has no unresolved conflict;
 - the current PR head SHA is the SHA that was validated;
-- the root README gate passed with meaningful content and self-review confirms
-  semantic relevance;
-- active `develop` rulesets enforce stable required checks and required
-  reviews, all checks passed on the current SHA, and squash is allowed;
-- native repository auto-merge is enabled; and
-- trusted changed-file classification says `LOW`.
+- the meaningful README gate passed and self-review confirms semantic
+  relevance;
+- active `develop` rulesets enforce required checks, required reviews, and
+  squash merging; and
+- all required checks passed for the current PR head SHA.
 
-The workflow uses GitHub-native `--auto --squash`. If required checks are
-missing, stale, failed, or unenforced, or if native auto-merge is disabled, it
-must leave the PR pending and report the exact blocker. High-risk PRs always
-remain `MANUAL_APPROVAL_REQUIRED`, including this workflow-configuration task.
+Then stop. A human must review and squash-merge the PR in GitHub. Do not call
+`gh pr merge`, pass `--auto`, or alter repository settings. The agent may
+continue only in a later user-authorized task after the merge is independently
+verified.
 
 ## Failure and recovery
 
@@ -123,6 +122,7 @@ is a stop condition.
 ## Final report
 
 Include changed files, commit SHA, branch, PR URL/number, README evidence,
-risk classification, every command actually run and its result, CI/auto-merge
-eligibility state, blockers, and example-repository impact. Stop after opening
-the PR and wait for human review when this skill is used for high-risk work.
+risk classification, every command actually run and its result, manual review
+state, blockers, and example-repository impact. Always stop after opening the
+PR and wait for human review; this is required for both low- and high-risk
+work.

@@ -3,6 +3,31 @@
 ## Source of truth
 GitHub is the source of truth for tracked code, skills, architecture notes, and committed lockfiles. Work on feature branches, push intentionally when authorized, and pull/fetch on the other machine before starting. Check `git status` before switching devices; local uncommitted files do not sync.
 
+## Mandatory task workflow
+
+New implementation tasks start only from `develop`. Before beginning a task,
+fetch `origin` and synchronize local `develop` with `git pull --ff-only
+origin develop`. Create every milestone or sub-milestone branch from the latest
+`origin/develop`, using the name `feature/<milestone>-<description>`; never
+branch from `main` or another feature branch. If a prerequisite is not merged
+into `develop`, stop and report the dependency.
+
+For each task, keep the scope assigned, add or update tests, run Rust format,
+Clippy, and workspace tests, self-review the complete diff, fix issues, rerun
+validation, commit, push the feature branch, and open a PR targeting `develop`.
+The agent must not merge its own PR and must stop for user review after opening
+it.
+
+Main synchronization requires both an actually merged PR and explicit user
+confirmation that the task is complete. A merged PR or GitHub status alone is
+not approval. After confirmation, fetch and fast-forward `develop`, verify the
+approved PR produced one squash commit and that it is the latest commit on
+`origin/develop`, fast-forward `main`, cherry-pick that verified commit, run
+validation on `main`, push without force, and return to a clean synchronized
+`develop`. Stop and report if the PR was merged with a merge commit, rebase
+merge, or multiple commits; if another commit is newer; or if conflict,
+validation, or branch protection blocks promotion.
+
 ## Machine setup
 1. Install git, rustup, a Node version manager (`.nvmrc` selects 24.22.3 LTS), and pnpm (follow the actual `packageManager` value after package.json is created).
 2. `rust-toolchain.toml` pins Rust and the WASM target for both machines; verify `rustup show`.

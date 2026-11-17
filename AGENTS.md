@@ -23,72 +23,143 @@ Do **not** claim React API compatibility or performance superiority unless tests
 
 ## Mandatory Git workflow
 
-### Branch creation
+### Lifecycle states
+
+Every task is tracked through these states:
+
+`TASK_READY` → `IMPLEMENTING` → `DOCUMENTING` → `VALIDATING` →
+`SELF_REVIEW` → `PR_OPEN` → `CI_PENDING` → `CI_FAILED` or `CI_PASSED` →
+`AUTO_MERGE_PENDING` → `MERGED_DEVELOP` → `PROMOTING_MAIN` →
+`PROMOTED_MAIN`.
+
+`BLOCKED` and `MANUAL_APPROVAL_REQUIRED` are terminal states for the current
+run until the blocking condition is removed or a human explicitly authorizes
+the next action.
+
+Valid transitions and gates:
+
+- `TASK_READY` → `IMPLEMENTING`: the task scope and acceptance criteria are
+  known, the worktree is clean, and the task branch starts at the latest
+  `origin/develop`.
+- `IMPLEMENTING` → `DOCUMENTING`: implementation and task-scoped tests are
+  complete enough to describe accurately.
+- `DOCUMENTING` → `VALIDATING`: the root `README.md` and any relevant module
+  documentation are updated in the same branch.
+- `VALIDATING` → `SELF_REVIEW`: all required local checks pass.
+- `SELF_REVIEW` → `PR_OPEN`: the complete diff is reviewed, risk is classified,
+  no secrets or unrelated changes are present, and the feature branch is
+  pushed with a PR targeting `develop`.
+- `PR_OPEN` → `CI_PENDING`: GitHub has accepted the PR and its head SHA is
+  recorded.
+- `CI_PENDING` → `CI_FAILED`: a required check fails, is cancelled, is stale,
+  or the README gate fails. Fix the branch and return to `VALIDATING`; never
+  merge around a failure.
+- `CI_PENDING` → `CI_PASSED`: all enforced checks passed for the current PR
+  head SHA and the required README gate passed.
+- `CI_PASSED` → `AUTO_MERGE_PENDING`: only a low-risk PR with enforced required
+  checks, required reviews, squash-only policy, no conflict, and native
+  auto-merge enabled may enter this state.
+- `CI_PASSED` → `MANUAL_APPROVAL_REQUIRED`: high-risk, ambiguous, or
+  infrastructure-sensitive work always takes this transition.
+- `AUTO_MERGE_PENDING` → `MERGED_DEVELOP`: GitHub performs a native squash
+  merge after its ruleset gates pass. The agent never merges its own PR.
+- `MERGED_DEVELOP` → `PROMOTING_MAIN`: a trusted event or an explicitly
+  authorized recovery identifies one exact merged PR and its squash SHA; the
+  SHA is the current tip of `origin/develop` and is not already on `main`.
+- `PROMOTING_MAIN` → `PROMOTED_MAIN`: the verified commit passes main
+  validation and is accepted through the configured protected promotion path.
+- Any failed safety check, ambiguous identity, API outage after bounded retry,
+  diverged history, conflict, or missing permission → `BLOCKED`.
+- `PROMOTED_MAIN` returns the checkout to a clean, synchronized `develop` and
+  then awaits the next `TASK_READY`.
+
+### Branch creation and implementation
 
 - `develop` is the only permitted starting branch for new implementation tasks.
-- Before starting any task, inspect the working tree, fetch `origin`, switch to local `develop`, and synchronize it with `origin/develop` using `git pull --ff-only origin develop`. If local `develop` does not exist, create it from `origin/develop` before pulling.
-- Every milestone or sub-milestone must use a separate feature branch created from the latest `origin/develop`.
-- Name feature branches `feature/<milestone>-<description>`.
-- Never create a task branch directly from `main` or another feature branch.
-- If the task depends on changes that are not merged into `develop`, stop and report the dependency.
-- This workflow configuration task is documentation-only, but it also follows the same rule by using a dedicated branch from the latest `origin/develop`.
+- Before starting, inspect the worktree, fetch `origin`, switch to local
+  `develop`, and synchronize it with `git pull --ff-only origin develop`. If
+  local `develop` does not exist, create it from `origin/develop` first.
+- Every task or sub-milestone uses its own branch from the latest
+  `origin/develop`, named `feature/<milestone>-<description>`.
+- Never create a task branch from `main` or another feature branch.
+- Do not start a dependent task until its prerequisite changes are present on
+  `develop`.
+- Keep implementation scope assigned; do not add examples to this repository.
 
-### Implementation and review
+### Mandatory README maintenance
+
+Every new implementation task, milestone, or sub-milestone **must** update the
+root `README.md` in the same feature branch and PR. Before implementation,
+read the existing README and identify affected sections. The update must
+accurately describe completed behavior, usage, architecture, or milestone
+status and must not make speculative performance or compatibility claims.
+
+The README gate rejects a missing, empty, whitespace-only, or unrelated
+mechanical touch. The CI check verifies a meaningful non-whitespace diff; the
+author and self-review must additionally verify semantic relevance and factual
+accuracy. Update module-specific README files when the affected module has
+one. Infrastructure maintenance, automated dependency updates, and emergency
+fixes may use an exception only when the trusted repository policy and an
+appropriate human approval explicitly record why a README update is not
+appropriate. A PR author cannot create an arbitrary label to bypass this rule.
+
+### Validation, publication, and merge
 
 For every task:
 
-1. Implement only the assigned scope.
-2. Write or update appropriate tests.
-3. Run Rust formatting, Clippy, and workspace tests.
-4. Self-review the complete diff.
-5. Fix discovered issues and rerun validation.
-6. Commit the completed changes.
-7. Push the feature branch to `origin`.
-8. Create a Pull Request targeting `develop`.
+1. Implement only the assigned scope and add or update appropriate tests.
+2. Update the root README and relevant module documentation.
+3. Run Rust formatting, Clippy, workspace tests, and package-specific checks.
+4. Self-review the complete diff, including README relevance and risk.
+5. Commit the completed changes and push only the feature branch.
+6. Open a PR targeting `develop` with the head SHA, base SHA, acceptance
+   criteria, README summary, checks, risk classification, and limitations.
+7. Wait for enforced CI and review gates. Low-risk PRs may request GitHub
+   native squash auto-merge; high-risk PRs require explicit human approval.
 
-Never merge the agent's own PR. After opening the PR, stop and wait for the user's review.
+The trusted `auto-merge-develop.yml` workflow checks changed paths and GitHub
+API state from a trusted base revision. It does not execute PR head code with a
+write token, does not trust labels or PR text as authorization, and fails
+closed when required checks or native auto-merge are not configured. The
+`promote-main.yml` workflow verifies one exact merged squash SHA and creates a
+promotion PR to `main`; it does not bypass protected branches or directly push
+around rulesets. GITHUB_TOKEN event suppression is handled with explicit,
+bounded workflow dispatch for promotion validation and a manual recovery path.
 
-### Human approval gate
+### Risk classification and approval
 
-Proceed to main-branch synchronization only when both conditions are satisfied:
+The repository-maintained path policy is conservative. Low-risk candidates
+include tested documentation changes and ordinary implementation work within
+an already approved architecture when no protected paths are changed. High-risk
+work always requires explicit human approval and includes:
 
-- The PR has actually been merged into `develop`.
-- The user has explicitly confirmed that the corresponding task is completed.
+- `AGENTS.md`, `.agents/skills/**`, `.github/**`, or workflow/ruleset changes;
+- GitHub Actions permissions, branch protection, rulesets, credentials, or
+  secret handling;
+- release or publishing infrastructure, dependency/toolchain security
+  changes, public API compatibility, or Rust/JavaScript ABI changes;
+- RustReactiveCore architectural changes or changes that weaken tests or CI;
+- any unexpected, ambiguous, or unclassified change.
 
-A merged PR alone is not sufficient authorization. Never infer approval from GitHub status or proceed automatically after a PR merge.
+Risk is determined from trusted changed-file inspection and repository policy,
+not from labels alone. This workflow-configuration task is high risk and must
+not auto-merge or auto-promote itself.
 
-### Promote an approved task to main
+### Human approval and main promotion
 
-After receiving explicit user confirmation:
+No implementation task pushes directly to `main`, and no agent merges its own
+PR. Promotion requires an actually merged, squash-only PR, the exact GitHub
+merge SHA, a current `origin/develop` tip match, duplicate-promotion checks,
+main validation, and a protected promotion path. If a direct push would bypass
+branch protection, use the promotion PR path or stop and report the blocker.
+Never force-push, rewrite shared history, reset or discard local work, or
+silently select whichever commit happens to be `HEAD`.
 
-1. Fetch the latest remote state.
-2. Switch to `develop`.
-3. Pull `origin/develop` using `--ff-only`.
-4. Identify the exact merge result associated with the approved PR.
-5. Verify that the commit corresponds to the approved task.
-6. Confirm that the PR was merged using a single squash commit.
-7. Confirm that the expected commit is the latest commit on `origin/develop`. If another commit has appeared afterward, stop and report instead of cherry-picking an unrelated `HEAD`.
-8. Switch to `main`.
-9. Pull `origin/main` using `--ff-only`.
-10. Cherry-pick the verified commit from `develop` into `main`.
-11. Run the required validation checks on `main`.
-12. Push `main` to `origin` without force-pushing.
-13. Switch back to `develop`.
-14. Synchronize `develop` again and verify that the working tree is clean.
-15. Stop and wait for the next user-assigned task.
-
-If the PR used a merge commit, rebase merge, or multiple commits instead of a single squash commit, stop and request an explicit promotion strategy. If cherry-picking causes conflicts, validation fails, or main-branch protection rejects the push, stop and report the blocker. Do not bypass protection rules or force-push.
-
-### Restrictions
-
-- Never push directly to `main` during implementation.
-- Never merge a PR without user authorization.
-- Never promote an unverified commit to `main`.
-- Never force-push `main` or `develop`.
-- Never silently skip review or validation.
-- Never start another dependent milestone before its prerequisites have been merged into `develop`.
-- Always leave the repository on `develop` after successful main synchronization.
-- Await the next task after completing the workflow.
+After a successful promotion, return to a clean synchronized `develop`. If the
+PR uses a merge commit, rebase merge, multiple ambiguous commits, a stale SHA,
+failed validation, missing required checks, a cherry-pick conflict, an API
+outage, or insufficient permissions, enter `BLOCKED` or
+`MANUAL_APPROVAL_REQUIRED` and report recovery instructions.
 
 ## Platform
 Support Ubuntu Linux and Apple macOS (including Apple Silicon). Use relative paths, Rust toolchain metadata, Node/pnpm lockfiles, and GitHub CI; never commit `target`, `node_modules`, generated WASM, machine-local links, or secrets. Do not assume GNU-only flags or OS-specific shell paths. Read `docs/development-workflow.md` when modifying tooling or package integration.

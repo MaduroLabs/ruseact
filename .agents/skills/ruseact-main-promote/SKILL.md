@@ -1,38 +1,97 @@
 ---
 name: ruseact-main-promote
-description: After the user explicitly confirms a specific Ruseact PR was merged into develop and its task is complete, verify the exact approved squash commit, update develop and main safely, cherry-pick that one commit to main, rerun Rust checks, push main, and return to develop. Never use for PR creation or before explicit post-merge approval.
+description: Verify one exact squash-merged Ruseact PR and promote it through the trusted main-promotion path, using a protected promotion PR for automation or an explicitly authorized manual recovery. Never guess from HEAD, bypass branch protection, or promote high-risk work automatically.
 ---
-# Promote an approved Ruseact PR from develop to main
+# Promote one approved Ruseact PR from develop to main
 
-## Critical authorization gate
+## Modes and authorization
 
-This is a **high-impact remote write**. Run only when the user explicitly invokes `$ruseact-main-promote`, identifies the PR number or exact PR URL, **and** confirms both that they merged it into `develop` and that its task is finished. A GitHub `MERGED` status, a generic "sync branches" request, or the skill invocation alone is not approval. If any part is missing, stop and ask for the missing confirmation. Do not merge PRs yourself.
+This skill supports two modes:
 
-Operate exclusively in `MaduroLabs/ruseact`. Read `AGENTS.md` and preserve its mandatory Git workflow. This skill promotes **exactly one approved PR** per invocation, never whatever happens to be the latest commit.
+1. **Trusted automation:** `.github/workflows/promote-main.yml` receives one
+   verified merged-PR event and performs API and SHA checks from trusted
+   repository code. It creates a traceable promotion PR to `main` and requests
+   native squash auto-merge only when `main` rulesets, checks, and repository
+   settings support that path.
+2. **Manual recovery:** run only after the user explicitly invokes
+   `$ruseact-main-promote`, identifies the exact PR number or URL, and confirms
+   that it was merged into `develop` and the task is complete. A generic
+   “promote latest” request or a GitHub `MERGED` status alone is insufficient.
 
-## Pre-flight verification (read-only first)
+Operate only in `MaduroLabs/ruseact`. This skill never changes rulesets or
+Actions permissions, never merges the implementation PR, never force-pushes,
+and never bypasses branch protection. High-risk PRs—including `AGENTS.md`,
+`.agents/skills/**`, `.github/**`, permissions, security, public API/ABI,
+release infrastructure, and significant RustReactiveCore changes—require
+explicit human approval and are not eligible for trusted automatic promotion.
 
-1. Identify the exact approved PR and record its number, title, URL and merge commit SHA:
+## Phase A — Identify and verify exactly one PR
 
-```bash
-gh pr view <PR_NUMBER> --repo MaduroLabs/ruseact --json number,url,title,state,mergedAt,baseRefName,mergeCommit,headRefName
-```
+1. Obtain the PR number and URL from the trusted closed-PR event or the user's
+   explicit manual request. Do not enumerate merged PRs and guess the latest.
+2. Verify repository identity, expected `origin`, clean worktree, no active
+   merge/cherry-pick/rebase, and GitHub authentication.
+3. Fetch `origin --prune`; ensure `origin/develop` and `origin/main` exist.
+4. Query GitHub for `number,url,title,state,mergedAt,baseRefName,mergeCommit,
+   headRefName,headSha,commits,files`. Require `state == MERGED`, a non-null
+   `mergedAt`, base branch `develop`, and a non-null exact merge SHA.
+5. Require the merge result to have one parent and confirm its changed paths
+   exactly match the merged PR. A merge commit, rebase result, ambiguous
+   identity, or multiple unverified candidates is a stop condition.
+6. Verify the exact squash SHA exists on `origin/develop` and is identical to
+   the current tip. If a newer commit is present, stop rather than selecting
+   arbitrary `HEAD`.
+7. Verify trusted CI and README gates passed for the PR's validated head SHA,
+   and classify changed paths using repository policy. High-risk work enters
+   `MANUAL_APPROVAL_REQUIRED`.
 
-2. Require `state == MERGED`, a non-null `mergedAt`, `baseRefName == develop`, and a non-null `mergeCommit.oid`. Check these values against the user's explicit approval. Never derive the target SHA from an arbitrary `HEAD`.
-3. Confirm the repo identity with `gh repo view --json nameWithOwner`, expected origin remote, clean worktree and no ongoing Git merge/cherry-pick/rebase. Do not stash, clean, reset, delete, or overwrite local changes.
-4. `git fetch origin --prune`; ensure both `origin/develop` and `origin/main` exist. Require the approved SHA to be **identical to** `git rev-parse origin/develop`. If a newer commit has reached `develop`, stop and report; do not cherry-pick the new tip.
-5. Inspect `git show --format=fuller --stat <SHA>` and the commit parents (`git rev-list --parents -n 1 <SHA>`). Require exactly one parent, with clear evidence it is the approved PR's single squash commit. Cross-check PR changed paths (`gh pr diff <PR_NUMBER> --name-only`) against the commit and inspect its diff. If merge method or commit identity is uncertain, or the PR was merged with a merge commit/rebase/multiple commits, stop and request a decision.
-6. Detect an already promoted commit (e.g., `git log origin/main --format=%B` contains `cherry picked from commit <SHA>` from `git cherry-pick -x`). If already promoted, do not create a duplicate; report idempotent completion and return to a clean `develop` if safe.
+## Phase B — Idempotency and concurrency
 
-## Synchronize and promote
+Before creating any promotion branch or PR:
 
-Only after all gates pass:
+- check for a prior cherry-pick trailer containing the exact source SHA on
+  `main`;
+- check whether the source patch or an open promotion PR already exists;
+- record source PR number/URL, source branch, source squash SHA, current
+  `origin/develop`, and current `origin/main`;
+- serialize promotion attempts with the repository promotion concurrency
+  group; and
+- stop on a newer `develop` commit, a changed `main` tip, a duplicate branch
+  without an open matching PR, or any conflicting event.
 
-1. `git switch develop` (or create local `develop` from `origin/develop` if absent and safe); `git pull --ff-only origin develop`. Check that local `HEAD` matches the verified `origin/develop` SHA.
-2. `git switch main` (or create local `main` from `origin/main` if absent and safe); `git pull --ff-only origin main`. No force-push or implicit merge/rebase.
-3. Before cherry-picking, inspect whether the exact patch is already present on `main`; if uncertain, stop. Cherry-pick **only** the verified commit using `git cherry-pick -x <VERIFIED_SHA>` for traceability.
-4. If the cherry-pick conflicts or becomes empty, do not resolve automatically. If this skill initiated the cherry-pick and the pre-operation worktree was clean, use `git cherry-pick --abort` to restore the pre-cherry-pick state, then stop and report the conflict. Never reset away unrelated user work.
-5. On the resulting local `main`, run and record:
+Duplicate and delayed events must produce an idempotent report, not a second
+cherry-pick or a second main commit.
+
+## Phase C — Protected promotion path
+
+The trusted automation and authorized recovery use this sequence:
+
+1. `git switch develop` and `git pull --ff-only origin develop`; verify the
+   exact approved squash SHA is still the tip.
+2. `git switch main` and `git pull --ff-only origin main`; verify the remote
+   main tip has not changed.
+3. Create a uniquely named `automation/promote-<PR>-<SHA>` branch from
+   `origin/main` and run `git cherry-pick -x <VERIFIED_SHA>` exactly once.
+4. Inspect the resulting diff and traceability trailer. Push only this
+   promotion branch, never `main` directly.
+5. Create or reuse a PR targeting `main`. Dispatch the trusted CI workflow
+   explicitly when the push was made by `GITHUB_TOKEN`; poll only a bounded
+   number of times and require success for the promotion branch head SHA.
+6. Request GitHub-native `--auto --squash` only when native auto-merge is
+   enabled, main has enforced required checks and a pull-request rule, squash
+   is allowed, and the verified promotion PR remains unchanged.
+7. Do not use a direct push when it would bypass a protected branch. If the
+   repository lacks the protected promotion configuration, leave the PR or
+   workflow blocked and report the exact settings required.
+
+The resulting GitHub promotion PR may have a new merge SHA; its body and
+cherry-pick trailer must preserve the original PR number and source squash
+SHA. A direct manual push to `main` is never a fallback for a protection
+failure.
+
+## Phase D — Main validation
+
+Before requesting promotion completion, run and record:
 
 ```bash
 cargo fmt --all -- --check
@@ -40,13 +99,26 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-6. Self-review `git show --stat HEAD`, commit message and original SHA provenance. Push `main` with normal `git push origin main` only if all checks pass and remote has not diverged. If checks or push fail, do not force-push, bypass protection or silently remove the new local commit; stop and report the recoverable state.
-7. After successful push, `git switch develop`, `git pull --ff-only origin develop`, verify clean worktree and final branch `develop`. Do not begin another task automatically.
+Run package, WASM, compiler, DOM, TypeScript, skill, and README checks required
+by the changed paths. Verify the resulting commit contains only the intended
+patch and that README and implementation remain consistent.
 
-## Final report
+## Phase E — Recovery and final state
 
-Include approved PR #/URL, original `develop` squash SHA, new `main` cherry-pick SHA, validation evidence, remote push outcome, final local branch and any blockers. An unsuccessful or partially completed promotion must **never** be reported as success.
+For failure, report PR number/URL, source and target branches, source squash
+SHA, resulting main SHA if any, failed operation, exact error, and whether a
+remote write completed. Retry only clearly transient API calls with bounded
+attempts. Never reset or discard unrelated work.
+
+After successful promotion, switch to `develop`, run
+`git pull --ff-only origin develop`, verify a clean worktree and matching
+remote tip, then stop. If the workflow was interrupted, use the recorded
+source SHA and idempotency checks before retrying.
 
 ## Absolute prohibitions
 
-Do not accept an unspecified PR; automatically approve a merge; promote a PR merged into `main` or another branch; cherry-pick `origin/develop` HEAD without matching the PR; rewrite history; force-push; bypass branch protection; push code if validation fails; or start a subsequent milestone. Stop on any unexpected condition.
+Do not promote an unspecified PR, a PR merged into another branch, a merge or
+rebase commit, a stale or ambiguous SHA, high-risk work without approval, or a
+patch already on `main`. Do not execute untrusted PR code with privileged
+credentials, force-push, rewrite shared history, bypass rulesets, modify
+branch protection automatically, or start another milestone.

@@ -1,48 +1,128 @@
 ---
 name: ruseact-pr-publish
-description: Publish a completed Ruseact task or milestone by inspecting the feature branch, running required Rust validation and self-review, committing only task changes, pushing the feature branch, and opening or updating a pull request targeting develop. Use only when the user explicitly invokes this skill to publish code or create a PR; never merge a PR or promote main.
+description: Validate and publish a Ruseact task with mandatory README maintenance, trusted risk classification, and CI-gated squash auto-merge eligibility. Use only when the user explicitly asks to publish a task or create its PR; never merge high-risk work or promote main.
 ---
 # Publish a reviewed Ruseact feature branch to develop
 
 ## Scope and authorization
 
-Run only for `MaduroLabs/ruseact` after the user explicitly asks to publish the current task or milestone. Invocation authorizes a scoped commit, feature-branch push, and PR creation, **not** a PR merge, a push to `develop`/`main`, or work in `ruseact-examples`.
+Run only for `MaduroLabs/ruseact` after the user explicitly asks to publish
+the current task or milestone. This skill authorizes a scoped commit, feature
+branch push, and PR creation. It does not authorize merging this task,
+changing repository rulesets, changing Actions permissions, pushing `main`, or
+working in `ruseact-examples`.
 
-Read the current `AGENTS.md`, `docs/development-workflow.md` if present, and relevant project documentation. Follow stricter repository rules if they exist. The user owns final PR review and merge.
+The trusted `.github/workflows/auto-merge-develop.yml` may request native
+squash auto-merge for an eligible low-risk PR after GitHub verifies enforced
+checks and reviews. This skill never enables auto-merge for high-risk work and
+never uses labels or PR text as a security decision. The current workflow
+configuration task is high risk and must remain pending explicit human review.
 
-## Pre-flight gate (before any mutation)
+Read `AGENTS.md`, `README.md`, `docs/development-workflow.md`, and relevant
+project documentation before acting. Follow stricter repository rules if they
+exist.
 
-1. Confirm repository identity: `git rev-parse --show-toplevel`, `git remote -v`, `gh repo view --json nameWithOwner`; it must be `MaduroLabs/ruseact`.
-2. Inspect `git status --short --branch`, current branch, `git log -5 --oneline`, `git diff`, `git diff --cached`, and `gh auth status`. Never auto-stash, clean, reset, or discard work.
-3. Require a feature branch `feature/<milestone>-<description>`. It must originate from `develop`, not `main` or another feature branch. If currently on `develop`, do not publish changes directly from it: create a new task branch from a clean and synchronized `origin/develop` **only when the user has identified the task and the worktree is clean**. If work already exists on the wrong branch, stop for explicit instructions; do not migrate work silently.
-4. `git fetch origin --prune`; verify `origin/develop` exists and that the branch contains its originally approved baseline. If `develop` advanced after the task branched, report this and require a safe integration decision rather than silently rebasing or merging.
-5. Confirm which files and commits belong to this one task. If there are unrelated modifications, untracked files, secrets, generated files, or ambiguous ownership, stop and request cleanup/selection. Check `AGENTS.md` exclusions (`target`, `node_modules`, generated WASM, machine-local paths, credentials).
-6. Check whether an open PR already exists for this head branch: `gh pr list --head <branch> --state open --json number,url,baseRefName`. Reuse a valid existing PR; never create a duplicate.
+## Phase A — Pre-publication verification
 
-## Validate and self-review
+1. Confirm `git rev-parse --show-toplevel`, the expected `origin` remote,
+   `gh repo view --json nameWithOwner`, and `gh auth status`.
+2. Inspect `git status --short --branch`, the current branch, recent commits,
+   unstaged and staged diffs, and any merge/cherry-pick/rebase state. Never
+   auto-stash, clean, reset, or discard work.
+3. Require `feature/<milestone>-<description>` based on the latest synchronized
+   `origin/develop`, not `main` or another feature branch. If `develop`
+   advanced after the branch was created, stop and request a safe integration
+   decision rather than silently rebasing or merging.
+4. Inspect the assigned task and acceptance criteria. Confirm only task-scoped
+   files are changed and no secrets, generated WASM, `target`, `node_modules`,
+   machine-local paths, or unrelated work are present.
+5. Verify that the root `README.md` changed in the same branch. Check that the
+   change is meaningful, relevant to the implementation, factually consistent
+   with source and tests, and not a whitespace-only or unrelated touch. Check
+   module-specific documentation when applicable.
+6. Run `git fetch origin --prune` and check for an existing open PR for the
+   exact head branch. Reuse a valid PR only when its base is exactly `develop`.
 
-Run from the repository root and record actual results:
+## Phase B — Local validation and self-review
+
+Run the actual required checks and record their results:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+python3 scripts/validate_skills.py
+python3 scripts/test_workflow_policy.py
 ```
 
-- Inspect the complete diff against `origin/develop` (`git diff origin/develop...HEAD`) **and** uncommitted diffs before committing.
-- Review scope, architecture, tests, potential regressions, dependencies and accidental secret leakage. Never claim a check passed without running it.
-- Fix only task-scoped issues, rerun relevant checks, and stop if validation fails or an architectural decision is unapproved.
-- For documentation-only updates, still run the repository-required checks or report the exact unavailable command/blocker; do not silently skip them.
+Run additional package, compiler, DOM, WASM, or TypeScript checks using the
+repository's actual tooling when those files are changed. For README
+validation, use the trusted base and head SHAs:
 
-## Commit, push, and PR
+```bash
+python3 scripts/validate_readme_update.py --base-sha <BASE_SHA> --head-sha <HEAD_SHA>
+python3 scripts/classify_changed_files.py --base-sha <BASE_SHA> --head-sha <HEAD_SHA>
+```
 
-1. Stage **explicit task-related paths only** with `git add -- <paths>`; never blindly stage everything with `git add -A`.
-2. Inspect `git diff --cached --check`, `git diff --cached --stat` and `git diff --cached`; confirm there are no unintended changes.
-3. Create a conventional, task-scoped commit if needed. If all intended changes were already committed, do not create an empty commit.
-4. Verify the local feature branch is safe to publish and no unexpected remote divergence exists. Push **only** the feature branch (`git push -u origin <branch>`), never force-push.
-5. Create a PR with `gh pr create --base develop --head <branch> --title '<title>' --body '<summary and checks>'` unless a valid PR already exists. Ensure the PR base is **exactly `develop`**.
-6. Report branch, commit SHA(s), PR number/URL, changed files, validation results, review findings, and blockers. **Stop and wait for the user to review and merge the PR.**
+Review `git diff origin/develop...HEAD`, all uncommitted diffs, tests,
+dependencies, architecture boundaries, risk, documentation accuracy, and
+potential secret leakage. High-risk paths include `AGENTS.md`,
+`.agents/skills/**`, `.github/**`, Actions permissions, credentials, release
+infrastructure, public API/ABI, and significant RustReactiveCore changes.
 
-## Absolute stop conditions
+## Phase C — Publication
 
-Wrong repository; dirty unrelated work; branch not based on `develop`; missing or diverged remote; unavailable authentication; validation or review failure; secrets detected; ambiguous task scope; unsafe push; conflicting PR base; or missing user authorization to publish. Never merge the PR, cherry-pick onto `main`, delete branches, force-push, or start the next task.
+After validation and self-review:
+
+1. Stage explicit task paths only with `git add -- <paths>`.
+2. Inspect `git diff --cached --check`, `--stat`, and the complete staged diff.
+3. Create a conventional task-scoped commit containing implementation and
+   README changes together. Do not create an empty commit.
+4. Verify no unexpected remote divergence, then push only the feature branch
+   with `git push -u origin <branch>`.
+5. Create a PR targeting `develop` with a structured body containing:
+   objective, implementation changes, README updates, acceptance criteria,
+   commands and results, risk classification, known limitations, head SHA, and
+   base SHA.
+6. Record the PR number, URL, head SHA, base SHA, and expected lifecycle state
+   `PR_OPEN`/`CI_PENDING`.
+
+The PR must not target `main`. Never push directly to `main`, merge the PR
+yourself, bypass branch protection, or change repository settings from this
+skill.
+
+## Phase D — CI-gated squash merge eligibility
+
+For a low-risk PR, the trusted workflow may enter `AUTO_MERGE_PENDING` only
+when all of the following are true:
+
+- the PR still targets `develop`, is not a draft, and has no conflict;
+- the current PR head SHA is the SHA that was validated;
+- the root README gate passed with meaningful content and self-review confirms
+  semantic relevance;
+- active `develop` rulesets enforce stable required checks and required
+  reviews, all checks passed on the current SHA, and squash is allowed;
+- native repository auto-merge is enabled; and
+- trusted changed-file classification says `LOW`.
+
+The workflow uses GitHub-native `--auto --squash`. If required checks are
+missing, stale, failed, or unenforced, or if native auto-merge is disabled, it
+must leave the PR pending and report the exact blocker. High-risk PRs always
+remain `MANUAL_APPROVAL_REQUIRED`, including this workflow-configuration task.
+
+## Failure and recovery
+
+On any failure, report the PR number/URL, source and target branches, head and
+base SHA, risk, failed operation, exact error, and whether a remote write
+completed. Retry only transient API operations with bounded attempts. Do not
+force-push, reset, discard work, weaken CI, bypass rulesets, or select an
+arbitrary `HEAD`. A newer `develop` tip, missing README update, ambiguous
+scope, stale checks, insufficient permission, or branch-protection rejection
+is a stop condition.
+
+## Final report
+
+Include changed files, commit SHA, branch, PR URL/number, README evidence,
+risk classification, every command actually run and its result, CI/auto-merge
+eligibility state, blockers, and example-repository impact. Stop after opening
+the PR and wait for human review when this skill is used for high-risk work.

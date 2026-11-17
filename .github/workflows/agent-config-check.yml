@@ -3,6 +3,16 @@ on:
   pull_request:
   push:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: "Trusted base commit for a manually dispatched validation"
+        required: false
+        type: string
+      head_sha:
+        description: "Commit to validate for a manually dispatched validation"
+        required: false
+        type: string
 permissions:
   contents: read
 
@@ -16,6 +26,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Rust toolchain
         run: rustup show active-toolchain
       - name: Check formatting
@@ -38,6 +50,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 12.16.1
@@ -58,7 +72,39 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate skills
         run: python3 scripts/validate_skills.py
+      - name: Test workflow policy
+        run: |
+          python3 scripts/test_workflow_policy.py
+          python3 scripts/test_automation_gate.py
       - name: Branch resume helper smoke test
         run: |
           python3 .agents/skills/ruseact-branch-resume/scripts/resume.py status
           python3 .agents/skills/ruseact-branch-resume/scripts/resume.py plan
+
+  readme:
+    name: README documentation
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.base_sha != '' && inputs.head_sha != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a meaningful root README update
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base_sha }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.head_sha }}
+        run: python3 scripts/validate_readme_update.py --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"
+
+  risk:
+    name: Risk classification
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.base_sha != '' && inputs.head_sha != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base_sha }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.head_sha }}
+        run: python3 scripts/classify_changed_files.py --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"

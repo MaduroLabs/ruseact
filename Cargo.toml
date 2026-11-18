@@ -13,3 +13,5 @@ rust-version = "1.99.0"
 
 [workspace.dependencies]
 ruseact-core = { path = "crates/ruseact-core", version = "0.0.0" }
+wasm-bindgen = "0.2.130"
+js-sys = "0.3.107"

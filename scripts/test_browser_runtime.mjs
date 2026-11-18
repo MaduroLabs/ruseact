@@ -22,8 +22,9 @@ for (const file of requiredBindingFiles) {
 function findBrowser() {
   const candidates = [
     process.env.RUSEACT_BROWSER,
-    "chromium",
     "google-chrome",
+    "google-chrome-stable",
+    "chromium",
     "chromium-browser",
   ].filter((candidate) => candidate !== undefined);
 

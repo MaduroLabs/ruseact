@@ -286,6 +286,8 @@ try {
     [
       "--headless=new",
       "--no-sandbox",
+      "--no-proxy-server",
+      "--proxy-bypass-list=<-loopback>",
       "--disable-gpu",
       "--disable-dev-shm-usage",
       "--no-first-run",

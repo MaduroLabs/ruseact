@@ -93,8 +93,9 @@ impl NodeId {
 
 /// A stable, graph-scoped identity for a registered computation.
 ///
-/// Computations are represented by metadata only in M1.2. The ID is the
-/// handle used to register dependencies and does not execute any callback.
+/// Computations are represented by graph-owned metadata only. The ID is the
+/// handle used to register dependencies and to identify pending dirty work;
+/// it does not execute any callback.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ComputationId {
     graph_id: GraphId,
@@ -261,6 +262,7 @@ impl NodeSlot {
 struct ComputationSlot {
     generation: u32,
     dependencies: Option<Vec<NodeId>>,
+    dirty: bool,
 }
 
 impl ComputationSlot {
@@ -268,17 +270,18 @@ impl ComputationSlot {
         Self {
             generation,
             dependencies: None,
+            dirty: false,
         }
     }
 }
 
 /// The graph-owned storage for signals and their generational identities.
 ///
-/// M1.2 models signal storage, computation identities, and explicit
-/// bidirectional dependency metadata. It does not schedule subscribers, flush
-/// a dirty queue, execute callbacks, or create mutation intents. Those
-/// behaviors will be added by later milestones with separate invariants and
-/// tests.
+/// M1.3 adds deterministic dirty propagation and an explicit queue-drain API
+/// to the M1.2 signal storage, computation identity, and bidirectional
+/// dependency metadata. The graph never executes computation bodies or
+/// callbacks; a host may drain the IDs and decide how to process them in a
+/// later milestone.
 pub struct ReactiveGraph {
     graph_id: GraphId,
     slots: Vec<NodeSlot>,
@@ -287,6 +290,7 @@ pub struct ReactiveGraph {
     computation_slots: Vec<ComputationSlot>,
     free_computation_slots: Vec<u32>,
     active_computations: usize,
+    pending_computations: Vec<ComputationId>,
 }
 
 impl ReactiveGraph {
@@ -301,6 +305,7 @@ impl ReactiveGraph {
             computation_slots: Vec::new(),
             free_computation_slots: Vec::new(),
             active_computations: 0,
+            pending_computations: Vec::new(),
         })
     }
 
@@ -330,8 +335,8 @@ impl ReactiveGraph {
 
     /// Registers an empty computation metadata record.
     ///
-    /// A computation has no executable body in M1.2. Its generational ID is
-    /// used only to maintain explicit signal dependency edges.
+    /// A computation has no executable body. Its generational ID is used to
+    /// maintain explicit signal dependency edges and identify dirty work.
     pub fn create_computation(&mut self) -> Result<ComputationId, DependencyError> {
         let (index, generation) = match self.free_computation_slots.pop() {
             Some(index) => {
@@ -350,6 +355,7 @@ impl ReactiveGraph {
         let slot = &mut self.computation_slots[index as usize];
         debug_assert!(slot.dependencies.is_none());
         slot.dependencies = Some(Vec::new());
+        slot.dirty = false;
         self.active_computations += 1;
 
         Ok(ComputationId {
@@ -398,7 +404,7 @@ impl ReactiveGraph {
     /// Adds a signal-to-computation dependency edge.
     ///
     /// Returns `true` when a new edge was added and `false` when the edge was
-    /// already present. No dirty state or scheduling work is produced.
+    /// already present. Subscription changes do not create dirty work.
     pub fn subscribe<T>(
         &mut self,
         signal: Signal<T>,
@@ -499,12 +505,14 @@ impl ReactiveGraph {
         Ok(())
     }
 
-    /// Disposes a computation and removes all of its dependency edges.
+    /// Disposes a computation, removes its dependency edges, and removes any
+    /// pending dirty work for its generation.
     pub fn dispose_computation(
         &mut self,
         computation: ComputationId,
     ) -> Result<(), DependencyError> {
         let computation_index = self.computation_index(computation)?;
+        self.remove_pending_computation(computation);
         let dependencies = self.computation_slots[computation_index]
             .dependencies
             .as_ref()
@@ -559,29 +567,59 @@ impl ReactiveGraph {
     /// Writes a signal value and reports whether the value changed.
     ///
     /// Equality is determined by `PartialEq`. An equal write leaves the
-    /// stored value untouched and returns [`SignalUpdate::Unchanged`]. M1.1
-    /// does not notify subscribers or schedule work for a changed signal;
-    /// notification is intentionally a later graph concern.
+    /// stored value untouched and produces no dirty work. A changed write
+    /// marks each live subscriber dirty; each computation remains queued only
+    /// once until [`Self::drain_pending_computations`] is called.
     pub fn set<T>(&mut self, signal: Signal<T>, value: T) -> Result<SignalUpdate, SignalError>
     where
         T: PartialEq + 'static,
     {
         let node_id = signal.id();
         let slot = self.slot_mut(node_id)?;
-        let stored = slot
-            .value
-            .as_deref_mut()
-            .ok_or(SignalError::InvalidNode(node_id))?;
-        let stored = stored
-            .downcast_mut::<T>()
-            .ok_or(SignalError::TypeMismatch(node_id))?;
+        let subscribers = {
+            let stored = slot
+                .value
+                .as_deref_mut()
+                .ok_or(SignalError::InvalidNode(node_id))?;
+            let stored = stored
+                .downcast_mut::<T>()
+                .ok_or(SignalError::TypeMismatch(node_id))?;
 
-        if *stored == value {
-            Ok(SignalUpdate::Unchanged)
-        } else {
+            if *stored == value {
+                return Ok(SignalUpdate::Unchanged);
+            }
+
             *stored = value;
-            Ok(SignalUpdate::Changed)
+            slot.subscribers.clone()
+        };
+
+        for computation in subscribers {
+            self.mark_computation_dirty(computation);
         }
+
+        Ok(SignalUpdate::Changed)
+    }
+
+    /// Removes and returns all currently pending computation IDs.
+    ///
+    /// IDs are returned in deterministic first-dirtied order. A computation
+    /// dirtied by multiple changed signals or writes before this call appears
+    /// once. The returned IDs are only identities: this method does not
+    /// execute a body, callback, render, batch, or other host work. A later
+    /// changed signal may enqueue the same computation again after it has been
+    /// drained.
+    pub fn drain_pending_computations(&mut self) -> Vec<ComputationId> {
+        let pending = std::mem::take(&mut self.pending_computations);
+        let mut drained = Vec::with_capacity(pending.len());
+
+        for computation in pending {
+            if let Ok(index) = self.computation_index(computation) {
+                self.computation_slots[index].dirty = false;
+                drained.push(computation);
+            }
+        }
+
+        drained
     }
 
     /// Disposes a signal node and invalidates all handles for its generation.
@@ -673,6 +711,46 @@ impl ReactiveGraph {
             if let Some(dependencies) = slot.dependencies.as_mut() {
                 dependencies.retain(|dependency| *dependency != node_id);
             }
+        }
+    }
+
+    fn mark_computation_dirty(&mut self, computation: ComputationId) {
+        if computation.graph_id != self.graph_id {
+            return;
+        }
+
+        let index = computation.index as usize;
+        let should_enqueue = {
+            let Some(slot) = self.computation_slots.get_mut(index) else {
+                return;
+            };
+
+            if slot.generation != computation.generation || slot.dependencies.is_none() {
+                return;
+            }
+
+            if slot.dirty {
+                false
+            } else {
+                slot.dirty = true;
+                true
+            }
+        };
+
+        if should_enqueue {
+            self.pending_computations.push(computation);
+        }
+    }
+
+    fn remove_pending_computation(&mut self, computation: ComputationId) {
+        self.pending_computations
+            .retain(|pending| *pending != computation);
+
+        if computation.graph_id == self.graph_id
+            && let Some(slot) = self.computation_slots.get_mut(computation.index as usize)
+            && slot.generation == computation.generation
+        {
+            slot.dirty = false;
         }
     }
 
@@ -963,6 +1041,170 @@ mod tests {
             graph.dispose_computation(computation),
             Err(DependencyError::InvalidComputation(computation))
         );
+    }
+
+    #[test]
+    fn changed_signals_propagate_in_deterministic_subscriber_order() {
+        let mut graph = ReactiveGraph::new();
+        let first_signal = graph.create_signal(1_u32).unwrap();
+        let second_signal = graph.create_signal(2_u32).unwrap();
+        let first = graph.create_computation().unwrap();
+        let second = graph.create_computation().unwrap();
+        let third = graph.create_computation().unwrap();
+
+        graph.subscribe(first_signal, first).unwrap();
+        graph.subscribe(first_signal, second).unwrap();
+        graph.subscribe(second_signal, second).unwrap();
+        graph.subscribe(second_signal, third).unwrap();
+
+        assert_eq!(graph.set(first_signal, 10), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.set(second_signal, 20), Ok(SignalUpdate::Changed));
+        assert_eq!(
+            graph.drain_pending_computations(),
+            vec![first, second, third]
+        );
+
+        assert!(graph.drain_pending_computations().is_empty());
+        assert_eq!(graph.set(second_signal, 21), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.drain_pending_computations(), vec![second, third]);
+    }
+
+    #[test]
+    fn unchanged_signal_values_do_not_propagate() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(String::from("same")).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        assert_eq!(
+            graph.set(signal, String::from("same")),
+            Ok(SignalUpdate::Unchanged)
+        );
+        assert!(graph.drain_pending_computations().is_empty());
+
+        assert_eq!(
+            graph.set(signal, String::from("changed")),
+            Ok(SignalUpdate::Changed)
+        );
+        assert_eq!(
+            graph.set(signal, String::from("changed")),
+            Ok(SignalUpdate::Unchanged)
+        );
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn repeated_changes_before_draining_are_deduplicated() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(0_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        assert_eq!(graph.set(signal, 1), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.set(signal, 2), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.set(signal, 3), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+
+        assert_eq!(graph.set(signal, 4), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn pending_work_survives_dependency_changes_without_future_old_updates() {
+        let mut graph = ReactiveGraph::new();
+        let first = graph.create_signal(1_u32).unwrap();
+        let second = graph.create_signal(2_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(first, computation).unwrap();
+
+        assert_eq!(graph.set(first, 10), Ok(SignalUpdate::Changed));
+        graph
+            .replace_dependencies(computation, &[second.id()])
+            .unwrap();
+        assert_eq!(graph.set(first, 11), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+
+        assert_eq!(graph.set(first, 12), Ok(SignalUpdate::Changed));
+        assert!(graph.drain_pending_computations().is_empty());
+        assert_eq!(graph.set(second, 20), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn signal_disposal_cleans_edges_but_does_not_return_stale_work() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(1_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        assert_eq!(graph.set(signal, 2), Ok(SignalUpdate::Changed));
+        graph.dispose(signal).unwrap();
+        assert!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+        assert_eq!(
+            graph.set(signal, 3),
+            Err(SignalError::InvalidNode(signal.id()))
+        );
+        assert!(graph.drain_pending_computations().is_empty());
+    }
+
+    #[test]
+    fn disposing_a_dirty_computation_removes_pending_work_before_reuse() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(1_u32).unwrap();
+        let first = graph.create_computation().unwrap();
+        graph.subscribe(signal, first).unwrap();
+
+        assert_eq!(graph.set(signal, 2), Ok(SignalUpdate::Changed));
+        graph.dispose_computation(first).unwrap();
+        assert!(graph.drain_pending_computations().is_empty());
+
+        let replacement = graph.create_computation().unwrap();
+        assert_eq!(replacement.index(), first.index());
+        assert_eq!(replacement.generation(), first.generation() + 1);
+        graph.subscribe(signal, replacement).unwrap();
+        assert_eq!(graph.set(signal, 3), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.drain_pending_computations(), vec![replacement]);
+        assert_ne!(first, replacement);
+    }
+
+    #[test]
+    fn dirty_work_is_isolated_between_graphs_and_invalid_writes_are_safe() {
+        let mut source = ReactiveGraph::new();
+        let source_signal = source.create_signal(1_u32).unwrap();
+        let source_computation = source.create_computation().unwrap();
+        source.subscribe(source_signal, source_computation).unwrap();
+
+        let mut target = ReactiveGraph::new();
+        let target_signal = target.create_signal(1_u32).unwrap();
+        let target_computation = target.create_computation().unwrap();
+        target.subscribe(target_signal, target_computation).unwrap();
+
+        assert_eq!(
+            target.set(source_signal, 2),
+            Err(SignalError::InvalidNode(source_signal.id()))
+        );
+        assert!(target.drain_pending_computations().is_empty());
+
+        assert_eq!(source.set(source_signal, 2), Ok(SignalUpdate::Changed));
+        assert_eq!(
+            source.drain_pending_computations(),
+            vec![source_computation]
+        );
+        assert!(target.drain_pending_computations().is_empty());
+
+        target.dispose(target_signal).unwrap();
+        assert_eq!(
+            target.set(target_signal, 2),
+            Err(SignalError::InvalidNode(target_signal.id()))
+        );
+        assert!(target.drain_pending_computations().is_empty());
     }
 
     #[test]

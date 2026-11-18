@@ -37,6 +37,7 @@ API compatibility is claimed.
 | M1.2 — Dependency tracking | Complete        |
 | M1.3 — Dirty propagation | Complete        |
 | M1.4 — Batching            | Complete        |
+| M1.5 — Core verification and benchmark baseline | Complete |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | Not implemented |
 | DOM renderer               | Not implemented |
@@ -60,6 +61,11 @@ The Rust reactive core supports:
 - Explicit pending-work draining without computation execution.
 - Explicit nested batching that keeps pending work gated until the outermost
   batch ends.
+- Deterministic reference-model stress coverage for dependency, queue,
+  lifecycle, batching, graph-isolation, and generational-identity invariants.
+- A dependency-free Rust-native benchmark baseline for core graph operations;
+  these measurements are not browser, JavaScript, WASM-bridge, or rendering
+  benchmarks.
 
 Computation execution, automatic dependency tracking, and scheduling are not
 yet implemented.
@@ -88,10 +94,37 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 python3 scripts/validate_skills.py
+cargo bench -p ruseact-core --bench core_baseline --locked -- --nocapture
 ```
 
 These commands verify the workspace and current Rust core; they are not a
 consumer application quickstart.
+
+## M1.5 core verification and benchmark baseline
+
+M1.5 verifies the M1.1–M1.4 RustReactiveCore contracts without adding runtime
+features. The core tests cover signal and computation lifecycle cleanup,
+bidirectional dependency consistency, atomic dependency replacement failures,
+deterministic dirty ordering and deduplication, nested batch drain gating,
+cross-graph isolation, stale-handle rejection, slot reuse, and generation
+exhaustion. A bounded deterministic stress test runs 1,500 mixed operations
+over 96 signals and 48 computations against an independent reference model;
+the lifecycle churn test performs 256 allocation/disposal cycles.
+
+Run the reproducible native baseline manually with:
+
+```bash
+cargo bench -p ruseact-core --bench core_baseline --locked -- --nocapture
+```
+
+The benchmark uses five warmed trials for small, medium, and large Rust graph
+fixtures and reports median/p95 elapsed nanoseconds, nanoseconds per operation,
+throughput, graph size, dependency edges, and affected computations. Results
+and the measured environment are recorded in
+[docs/benchmarks/m1.5-core-baseline.md](docs/benchmarks/m1.5-core-baseline.md).
+They establish a reproducible Rust-native baseline only; they do not support
+claims about React, Solid, Leptos, browser rendering, JavaScript execution,
+WASM crossings, or end-to-end application performance.
 
 ## Manual-approval development workflow
 

@@ -850,7 +850,196 @@ impl Default for ReactiveGraph {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+
+    fn assert_graph_invariants(graph: &ReactiveGraph) {
+        let mut live_nodes = 0;
+
+        for (index, slot) in graph.slots.iter().enumerate() {
+            let node_id = NodeId {
+                graph_id: graph.graph_id,
+                index: index as u32,
+                generation: slot.generation,
+            };
+
+            if slot.value.is_some() {
+                live_nodes += 1;
+                for computation in &slot.subscribers {
+                    assert_eq!(computation.graph_id, graph.graph_id);
+                    let computation_slot = graph
+                        .computation_slots
+                        .get(computation.index as usize)
+                        .expect("subscriber must reference an allocated slot");
+                    assert_eq!(computation_slot.generation, computation.generation);
+                    let dependencies = computation_slot
+                        .dependencies
+                        .as_ref()
+                        .expect("subscriber must reference a live computation");
+                    assert!(dependencies.contains(&node_id));
+                }
+            } else {
+                assert!(slot.subscribers.is_empty());
+            }
+        }
+
+        assert_eq!(live_nodes, graph.active_nodes);
+
+        let pending: HashSet<_> = graph.pending_computations.iter().copied().collect();
+        assert_eq!(pending.len(), graph.pending_computations.len());
+
+        let mut live_computations = 0;
+        for (index, slot) in graph.computation_slots.iter().enumerate() {
+            let computation = ComputationId {
+                graph_id: graph.graph_id,
+                index: index as u32,
+                generation: slot.generation,
+            };
+
+            if let Some(dependencies) = &slot.dependencies {
+                live_computations += 1;
+                assert_eq!(slot.dirty, pending.contains(&computation));
+
+                for node_id in dependencies {
+                    assert_eq!(node_id.graph_id, graph.graph_id);
+                    let node_slot = graph
+                        .slots
+                        .get(node_id.index as usize)
+                        .expect("dependency must reference an allocated slot");
+                    assert_eq!(node_slot.generation, node_id.generation);
+                    assert!(node_slot.value.is_some());
+                    assert!(node_slot.subscribers.contains(&computation));
+                }
+            } else {
+                assert!(!slot.dirty);
+                assert!(!pending.contains(&computation));
+            }
+        }
+
+        assert_eq!(live_computations, graph.active_computations);
+        for computation in &graph.pending_computations {
+            assert_eq!(computation.graph_id, graph.graph_id);
+            let slot = graph
+                .computation_slots
+                .get(computation.index as usize)
+                .expect("pending work must reference an allocated slot");
+            assert_eq!(slot.generation, computation.generation);
+            assert!(slot.dependencies.is_some());
+            assert!(slot.dirty);
+        }
+    }
+
+    struct ReferenceModel {
+        values: Vec<u32>,
+        subscribers: Vec<Vec<usize>>,
+        pending: Vec<usize>,
+        dirty: Vec<bool>,
+    }
+
+    fn apply_reference_set(
+        graph: &mut ReactiveGraph,
+        signal: Signal<u32>,
+        signal_index: usize,
+        value: u32,
+        model: &mut ReferenceModel,
+    ) {
+        let expected = if model.values[signal_index] == value {
+            SignalUpdate::Unchanged
+        } else {
+            SignalUpdate::Changed
+        };
+        assert_eq!(graph.set(signal, value), Ok(expected));
+
+        if expected == SignalUpdate::Changed {
+            model.values[signal_index] = value;
+            for &computation_index in &model.subscribers[signal_index] {
+                if !model.dirty[computation_index] {
+                    model.dirty[computation_index] = true;
+                    model.pending.push(computation_index);
+                }
+            }
+        }
+    }
+
+    fn apply_reference_subscribe(
+        graph: &mut ReactiveGraph,
+        signal: Signal<u32>,
+        signal_index: usize,
+        computation: ComputationId,
+        computation_index: usize,
+        dependencies: &mut [Vec<usize>],
+        subscribers: &mut [Vec<usize>],
+    ) {
+        let expected = !subscribers[signal_index].contains(&computation_index);
+        assert_eq!(graph.subscribe(signal, computation), Ok(expected));
+        if expected {
+            subscribers[signal_index].push(computation_index);
+            dependencies[computation_index].push(signal_index);
+        }
+    }
+
+    fn apply_reference_unsubscribe(
+        graph: &mut ReactiveGraph,
+        signal: Signal<u32>,
+        signal_index: usize,
+        computation: ComputationId,
+        computation_index: usize,
+        dependencies: &mut [Vec<usize>],
+        subscribers: &mut [Vec<usize>],
+    ) {
+        let expected = subscribers[signal_index].contains(&computation_index);
+        assert_eq!(graph.unsubscribe(signal, computation), Ok(expected));
+        if expected {
+            subscribers[signal_index].retain(|index| *index != computation_index);
+            dependencies[computation_index].retain(|index| *index != signal_index);
+        }
+    }
+
+    fn apply_reference_replacement(
+        graph: &mut ReactiveGraph,
+        signals: &[Signal<u32>],
+        computation: ComputationId,
+        computation_index: usize,
+        requested: &[usize],
+        dependencies: &mut [Vec<usize>],
+        subscribers: &mut [Vec<usize>],
+    ) {
+        let requested_ids: Vec<_> = requested.iter().map(|index| signals[*index].id()).collect();
+        graph
+            .replace_dependencies(computation, &requested_ids)
+            .expect("all reference-model dependencies are valid");
+
+        let mut next = Vec::new();
+        for &signal_index in requested {
+            if !next.contains(&signal_index) {
+                next.push(signal_index);
+            }
+        }
+
+        for signal_index in dependencies[computation_index].iter().copied() {
+            subscribers[signal_index].retain(|index| *index != computation_index);
+        }
+        for &signal_index in &next {
+            if !subscribers[signal_index].contains(&computation_index) {
+                subscribers[signal_index].push(computation_index);
+            }
+        }
+        dependencies[computation_index] = next;
+    }
+
+    #[derive(Clone, Copy)]
+    struct DeterministicRng(u64);
+
+    impl DeterministicRng {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0
+        }
+    }
 
     #[test]
     fn graph_starts_empty() {
@@ -1559,6 +1748,285 @@ mod tests {
             Err(SignalError::TypeMismatch(signal.id()))
         );
         assert_eq!(*graph.read(signal).unwrap(), 7);
+    }
+
+    #[test]
+    fn invalid_dependency_replacement_preserves_both_directions() {
+        let mut graph = ReactiveGraph::new();
+        let first = graph.create_signal(1_u32).unwrap();
+        let second = graph.create_signal(2_u32).unwrap();
+        let mut foreign_graph = ReactiveGraph::new();
+        let foreign = foreign_graph.create_signal(3_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+
+        graph.subscribe(first, computation).unwrap();
+        let before_dependencies = graph.computation_slots[computation.index() as usize]
+            .dependencies
+            .clone();
+        let before_first_subscribers = graph.slots[first.id().index() as usize].subscribers.clone();
+        let before_second_subscribers = graph.slots[second.id().index() as usize]
+            .subscribers
+            .clone();
+
+        assert_eq!(
+            graph.replace_dependencies(computation, &[second.id(), foreign.id()]),
+            Err(DependencyError::InvalidSignal(foreign.id()))
+        );
+        assert_eq!(
+            graph.computation_slots[computation.index() as usize].dependencies,
+            before_dependencies
+        );
+        assert_eq!(
+            graph.slots[first.id().index() as usize].subscribers,
+            before_first_subscribers
+        );
+        assert_eq!(
+            graph.slots[second.id().index() as usize].subscribers,
+            before_second_subscribers
+        );
+        assert_graph_invariants(&graph);
+    }
+
+    #[test]
+    fn deterministic_stress_matches_reference_model_and_preserves_invariants() {
+        const COMPUTATION_COUNT: usize = 48;
+        const OPERATION_COUNT: usize = 1_500;
+        const SIGNAL_COUNT: usize = 96;
+
+        let mut graph = ReactiveGraph::new();
+        let signals: Vec<_> = (0..SIGNAL_COUNT)
+            .map(|_| graph.create_signal(0_u32).unwrap())
+            .collect();
+        let computations: Vec<_> = (0..COMPUTATION_COUNT)
+            .map(|_| graph.create_computation().unwrap())
+            .collect();
+        let mut model = ReferenceModel {
+            values: vec![0_u32; SIGNAL_COUNT],
+            subscribers: vec![Vec::new(); SIGNAL_COUNT],
+            pending: Vec::new(),
+            dirty: vec![false; COMPUTATION_COUNT],
+        };
+        let mut dependencies = vec![Vec::new(); COMPUTATION_COUNT];
+
+        for computation_index in 0..COMPUTATION_COUNT {
+            let initial = [
+                (computation_index * 7) % SIGNAL_COUNT,
+                (computation_index * 7 + 13) % SIGNAL_COUNT,
+                (computation_index * 7 + 29) % SIGNAL_COUNT,
+                (computation_index * 7 + 47) % SIGNAL_COUNT,
+            ];
+            for signal_index in initial {
+                if !dependencies[computation_index].contains(&signal_index) {
+                    apply_reference_subscribe(
+                        &mut graph,
+                        signals[signal_index],
+                        signal_index,
+                        computations[computation_index],
+                        computation_index,
+                        &mut dependencies,
+                        &mut model.subscribers,
+                    );
+                }
+            }
+        }
+
+        let mut rng = DeterministicRng(0x4d_31_35_76_65_72_69_66);
+        for step in 0..OPERATION_COUNT {
+            match rng.next() % 8 {
+                0 | 1 => {
+                    let signal_index = (rng.next() as usize) % SIGNAL_COUNT;
+                    let value = if rng.next().is_multiple_of(5) {
+                        model.values[signal_index]
+                    } else {
+                        (rng.next() as u32).wrapping_add(step as u32 + 1)
+                    };
+                    apply_reference_set(
+                        &mut graph,
+                        signals[signal_index],
+                        signal_index,
+                        value,
+                        &mut model,
+                    );
+                }
+                2 => {
+                    let expected: Vec<_> = model
+                        .pending
+                        .drain(..)
+                        .map(|index| computations[index])
+                        .collect();
+                    for computation_index in &expected {
+                        model.dirty[computation_index.index() as usize] = false;
+                    }
+                    assert_eq!(graph.drain_pending_computations(), expected);
+                }
+                3 => {
+                    let computation_index = (rng.next() as usize) % COMPUTATION_COUNT;
+                    let requested_len = (rng.next() as usize) % 9;
+                    let requested: Vec<_> = (0..requested_len)
+                        .map(|offset| (rng.next() as usize + offset * 11) % SIGNAL_COUNT)
+                        .collect();
+                    apply_reference_replacement(
+                        &mut graph,
+                        &signals,
+                        computations[computation_index],
+                        computation_index,
+                        &requested,
+                        &mut dependencies,
+                        &mut model.subscribers,
+                    );
+                }
+                4 => {
+                    let signal_index = (rng.next() as usize) % SIGNAL_COUNT;
+                    let computation_index = (rng.next() as usize) % COMPUTATION_COUNT;
+                    if rng.next() & 1 == 0 {
+                        apply_reference_subscribe(
+                            &mut graph,
+                            signals[signal_index],
+                            signal_index,
+                            computations[computation_index],
+                            computation_index,
+                            &mut dependencies,
+                            &mut model.subscribers,
+                        );
+                    } else {
+                        apply_reference_unsubscribe(
+                            &mut graph,
+                            signals[signal_index],
+                            signal_index,
+                            computations[computation_index],
+                            computation_index,
+                            &mut dependencies,
+                            &mut model.subscribers,
+                        );
+                    }
+                }
+                5 => {
+                    graph.begin_batch().unwrap();
+                    for offset in 0..3 {
+                        let signal_index = (rng.next() as usize + offset) % SIGNAL_COUNT;
+                        let value = (rng.next() as u32).wrapping_add(step as u32);
+                        apply_reference_set(
+                            &mut graph,
+                            signals[signal_index],
+                            signal_index,
+                            value,
+                            &mut model,
+                        );
+                    }
+                    assert!(graph.drain_pending_computations().is_empty());
+                    graph.begin_batch().unwrap();
+                    let signal_index = (rng.next() as usize) % SIGNAL_COUNT;
+                    let value = (rng.next() as u32).wrapping_add(1);
+                    apply_reference_set(
+                        &mut graph,
+                        signals[signal_index],
+                        signal_index,
+                        value,
+                        &mut model,
+                    );
+                    assert!(graph.drain_pending_computations().is_empty());
+                    graph.end_batch().unwrap();
+                    assert!(graph.drain_pending_computations().is_empty());
+                    graph.end_batch().unwrap();
+                }
+                6 => {
+                    let signal_index = (rng.next() as usize) % SIGNAL_COUNT;
+                    assert_eq!(
+                        *graph.read(signals[signal_index]).unwrap(),
+                        model.values[signal_index]
+                    );
+                }
+                _ => {
+                    let signal_index = (rng.next() as usize) % SIGNAL_COUNT;
+                    for offset in 0..4 {
+                        let value = model.values[signal_index].wrapping_add(offset + 1);
+                        apply_reference_set(
+                            &mut graph,
+                            signals[signal_index],
+                            signal_index,
+                            value,
+                            &mut model,
+                        );
+                    }
+                }
+            }
+
+            assert_graph_invariants(&graph);
+        }
+
+        let expected: Vec<_> = model
+            .pending
+            .drain(..)
+            .map(|index| computations[index])
+            .collect();
+        for computation_index in &expected {
+            model.dirty[computation_index.index() as usize] = false;
+        }
+        assert_eq!(graph.drain_pending_computations(), expected);
+        assert_graph_invariants(&graph);
+    }
+
+    #[test]
+    fn lifecycle_churn_preserves_generations_cleanup_and_graph_isolation() {
+        const CYCLES: usize = 256;
+
+        let mut graph = ReactiveGraph::new();
+        let mut foreign_graph = ReactiveGraph::new();
+        let foreign_signal = foreign_graph.create_signal(0_u32).unwrap();
+        let mut previous_signal: Option<Signal<u32>> = None;
+        let mut previous_computation: Option<ComputationId> = None;
+
+        for cycle in 0..CYCLES {
+            let signal = graph.create_signal(cycle as u32).unwrap();
+            let computation = graph.create_computation().unwrap();
+            graph.subscribe(signal, computation).unwrap();
+
+            if cycle % 2 == 0 {
+                graph.begin_batch().unwrap();
+                graph.set(signal, cycle as u32 + 1).unwrap();
+                assert!(graph.drain_pending_computations().is_empty());
+                graph.end_batch().unwrap();
+            } else {
+                graph.set(signal, cycle as u32 + 1).unwrap();
+            }
+
+            assert_eq!(
+                graph.set(foreign_signal, cycle as u32 + 1),
+                Err(SignalError::InvalidNode(foreign_signal.id()))
+            );
+            assert_graph_invariants(&graph);
+
+            graph.dispose_computation(computation).unwrap();
+            graph.dispose(signal).unwrap();
+            assert!(graph.drain_pending_computations().is_empty());
+            assert_graph_invariants(&graph);
+
+            if let Some(previous_signal) = previous_signal {
+                assert_eq!(signal.id().index(), previous_signal.id().index());
+                assert_eq!(
+                    signal.id().generation(),
+                    previous_signal.id().generation() + 1
+                );
+            }
+            if let Some(previous_computation) = previous_computation {
+                assert_eq!(computation.index(), previous_computation.index());
+                assert_eq!(
+                    computation.generation(),
+                    previous_computation.generation() + 1
+                );
+            }
+
+            assert_eq!(
+                graph.read(signal),
+                Err(SignalError::InvalidNode(signal.id()))
+            );
+            previous_signal = Some(signal);
+            previous_computation = Some(computation);
+        }
+
+        assert!(graph.is_empty());
+        assert_eq!(graph.active_computations, 0);
+        assert_graph_invariants(&graph);
     }
 
     #[test]

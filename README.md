@@ -40,6 +40,7 @@ API compatibility is claimed.
 | M1.5 — Core verification and benchmark baseline | Complete |
 | M2.1 — WASM ABI design | Reviewed and approved |
 | M2.2 — Rust WASM exports | Implemented; pending review |
+| M2.2.1 — Computation identity bridge | Implemented; pending review |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.2 Rust bridge implemented; TypeScript wrapper not implemented |
 | DOM renderer               | Not implemented |
@@ -72,6 +73,10 @@ The Rust reactive core supports:
   disposal, opaque validated signal and computation handles, scalar signal
   operations, dependency metadata operations, nested batching, and copied
   pending-computation IDs. The bridge does not execute computations.
+- A validated `WasmCore.computation_identity()` export that returns the copied
+  `(slot, generation)` metadata for an existing live computation handle. The
+  accessor is instance-bound and read-only; it does not construct handles from
+  caller-provided numeric identities.
 
 Computation execution, automatic dependency tracking, and scheduling are not
 yet implemented. The M2.3 TypeScript runtime wrapper, DOM renderer, compiler,
@@ -159,9 +164,18 @@ resource identity fields where applicable).
 Dependency lists are instance-bound and replace dependencies atomically. Batch
 boundaries preserve M1.4 nested semantics. `drain_pending_computations()`
 returns a copied `Uint32Array` containing FIFO `(slot, generation)` pairs;
-the bridge does not transfer Rust references or invoke JavaScript callbacks.
-Cross-worker handle transfer, automatic disposal, computation execution,
-scheduling, and the public TypeScript wrapper remain future work.
+`computation_identity()` returns the same pair format only after validating an
+existing computation handle. The bridge does not transfer Rust references or
+invoke JavaScript callbacks. Cross-worker handle transfer, automatic disposal,
+computation execution, scheduling, and the public TypeScript wrapper remain
+future work.
+
+The identity accessor is the narrow M2.2.1 handoff for the future TypeScript
+wrapper: on computation creation, the wrapper will retain the original opaque
+handle in a per-instance registry keyed by the validated pair. Pending pairs
+will be looked up in that registry after shape validation; they will never be
+used to construct or forge a new `WasmHandle`. Unknown pairs are an internal
+consistency failure, not an item to ignore or remap.
 
 Build and run the bridge smoke test with a user-space `wasm-bindgen` CLI that
 matches the crate version:

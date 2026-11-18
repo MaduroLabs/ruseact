@@ -35,7 +35,7 @@ API compatibility is claimed.
 | M0 — Workspace foundation  | Complete        |
 | M1.1 — Signal foundation   | Complete        |
 | M1.2 — Dependency tracking | Complete        |
-| Dirty propagation          | Not implemented |
+| M1.3 — Dirty propagation | Complete        |
 | Scheduling and batching    | Not implemented |
 | WASM integration           | Not implemented |
 | DOM renderer               | Not implemented |
@@ -54,9 +54,12 @@ The Rust reactive core supports:
 - Subscription, unsubscription, and dependency replacement.
 - Dependency cleanup on disposal.
 - Validation of stale and foreign handles.
+- Changed-signal dirty propagation with deterministic, deduplicated pending
+  computation IDs.
+- Explicit pending-work draining without computation execution.
 
-Computation execution and automatic dependency tracking are not yet
-implemented.
+Computation execution, automatic dependency tracking, scheduling, and batching
+are not yet implemented.
 
 ## Repository structure
 

@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m1.3-dirty-propagation-v2`
+- Branch: `feature/m1.4-batching`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `6a8d1bb`
-- Last verified on: Linux x86_64, 2026-11-18 for M1.3; M1.2 was verified on Linux x86_64, 2026-11-16
+- Baseline: `origin/develop` at `e837416`
+- Last verified on: Linux x86_64, 2026-11-18 for M1.4; M1.3 was verified on Linux x86_64, 2026-11-18
 
 ## Completed
 
@@ -24,6 +24,9 @@
 - [x] Implemented M1.3 changed-signal dirty propagation with deterministic first-dirtied ordering, queue deduplication, explicit draining, and computation disposal cleanup.
 - [x] Added deterministic M1.3 tests for propagation, unchanged writes, repeated changes, drain boundaries, dependency changes while pending, signal disposal, graph isolation, invalid handles, and generational computation reuse.
 - [x] Documented M1.3 queue ownership, ordering, disposal, and deferred execution/batching decisions in `docs/architecture.md` and `README.md`.
+- [x] Implemented M1.4 explicit nested batching with checked depth, gated draining, preserved queue ordering, and safe boundary errors.
+- [x] Added deterministic M1.4 tests for single and nested batches, active-batch drains, deduplication, unchanged writes, disposal, invalid boundaries, consecutive batches, and post-batch updates.
+- [x] Documented M1.4 lifecycle, nested semantics, drain behavior, error handling, and deferred execution responsibilities in `docs/architecture.md` and `README.md`.
 - [x] Added mandatory README maintenance, lifecycle states, conservative risk classification, and fail-closed recovery rules.
 - [x] Added README, risk, manual API verification, idempotency, and protected promotion checks.
 - [x] Disabled remote automatic merge and promotion workflows and removed their repository definitions.
@@ -31,7 +34,7 @@
 
 ## In progress / next
 
-- [ ] Define M1.4 batching invariants separately; do not infer batching or execution from the M1.3 dirty queue.
+- [ ] Define M1.5 benchmark and stress-test scope separately; do not begin it in this branch.
 - [ ] Specify the Rust-to-JavaScript ABI before adding WASM exports.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
@@ -60,12 +63,18 @@
 - `cargo test --workspace --locked` — PASS; 22 core tests, 0 WASM tests, 0 doc tests (Linux; Rust `1.99.0`, M1.3 v2).
 - `cargo check --workspace --target wasm32-unknown-unknown --locked` — PASS (Linux; Rust `1.99.0`, M1.3 v2).
 
+- `cargo fmt --all -- --check` — PASS (Linux; Rust `1.99.0`, M1.4).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` — PASS (Linux; Rust `1.99.0`, M1.4).
+- `cargo test -p ruseact-core --locked` — PASS; 32 core unit tests, 0 doc tests (Linux; Rust `1.99.0`, M1.4).
+- `cargo test --workspace --locked` — PASS; 32 core tests, 0 WASM tests, 0 doc tests (Linux; Rust `1.99.0`, M1.4).
+- `cargo check --workspace --target wasm32-unknown-unknown --locked` — PASS (Linux; Rust `1.99.0`, M1.4).
+
 ## Blockers / decisions
 
 - M0 intentionally has no runtime API, compiler, DOM renderer, or complex scheduler.
 - No files are added to the separate `ruseact-examples` repository.
 - The committed `.nvmrc` and CI configuration pin Node `24.22.3` for reproducible CI.
-- M1.3 exposes pending computation identities only; it does not execute computations or define batching, scheduling priority, compiler tracking, DOM behavior, or a WASM ABI.
+- M1.4 exposes batch boundaries only; it does not execute computations or define scheduling priority, compiler tracking, DOM behavior, or a WASM ABI.
 - GitHub native auto-merge is disabled; the active `develop` and `main` rulesets enforce required reviews, required CI contexts, and squash merging.
 - Automatic merge and promotion workflow records are disabled in GitHub Actions and their workflow files are removed from the repository. Future promotion requires explicit user invocation and manual merging of the protected promotion PR.
 - Linux verification used the repository-pinned Rust `1.99.0` toolchain and a user-space Ubuntu linker/sysroot because the host did not provide a global `cc` linker; no global packages or repository-generated toolchain files were added.

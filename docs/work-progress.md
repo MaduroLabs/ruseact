@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m2.2-wasm-exports`
+- Branch: `feature/m2.2.1-computation-identity`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `2fa97384d048333067bf690063050bb63afcc404`
-- Last verified on: Linux x86_64, 2026-11-18 for M2.2; M1.1–M1.5 and the
+- Baseline: `origin/develop` at `f24d3bd1946710bd23d4beb276ade3534bc0ff8a`
+- Last verified on: Linux x86_64, 2026-11-18 for M2.2.1; M1.1–M1.5 and the
   reviewed M2.1 ABI design were already merged into this baseline
 
 ## Completed
@@ -48,12 +48,22 @@
   stale handles, and pending FIFO behavior.
 - [x] Updated the README and architecture documents with the implemented ABI,
   build commands, limitations, and the M2.3 handoff.
+- [x] Added the approved M2.2.1 `WasmCore.computation_identity()` export,
+  reusing live computation validation and returning copied `(slot, generation)`
+  metadata without constructing handles.
+- [x] Added native identity, stale-generation, foreign-instance, wrong-resource,
+  disposal, queue-preservation, and slot-reuse coverage plus real WASM smoke
+  assertions for the new export.
+- [x] Documented the M2.3 per-instance handle-registry handoff and the
+  prohibition on numeric handle construction.
 
 ## In progress / next
 
 - [x] Specify the Rust-to-JavaScript ABI before adding WASM exports.
 - [x] Obtain explicit approval for the M2.1 MVP decisions.
 - [x] Implement and test the approved WASM bridge in M2.2.
+- [x] Add the narrowly scoped M2.2.1 computation identity bridge needed for
+  safe pending-computation handle mapping.
 - [ ] Build the M2.3 public TypeScript wrapper; preserve the M2.2 opaque-handle
   and structured-error contract.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
@@ -122,6 +132,18 @@
 - M2.2 policy validation — PASS: repository skill, workflow, automation, README,
   and risk checks were run against the final feature diff; generated WASM
   outputs remained outside the repository.
+- M2.2.1 validation — PASS: `cargo fmt --all -- --check`, `cargo clippy
+  --workspace --all-targets --locked -- -D warnings`, `cargo test
+  --workspace --locked` (35 core tests and 10 bridge tests; 45 total; 0 doc
+  tests), `cargo check --workspace --target wasm32-unknown-unknown --locked`,
+  `pnpm typecheck` (host Node `22.23.3`), and `git diff --check`.
+- M2.2.1 real bridge verification — PASS: release `ruseact-wasm` build for
+  `wasm32-unknown-unknown`, `wasm-bindgen-cli 0.2.130` generation for the Node
+  target, generated declaration inspection, and
+  `RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.2.1-bindgen node
+  scripts/test_wasm_bridge.mjs`. The smoke test passed identity retrieval,
+  pair-format compatibility, wrong-kind, foreign-instance, stale-handle, and
+  post-disposal rejection scenarios without changing pending FIFO behavior.
 
 ## Blockers / decisions
 
@@ -144,3 +166,8 @@
   `wasm-bindgen-cli 0.2.130`; the CLI was installed under `/data/tmp` and no
   generated artifact is committed. Browser and cross-worker execution remain
   future integration work.
+- M2.2.1 intentionally does not change `ruseact-core` or implement the M2.3
+  TypeScript registry. The existing bridge drain checks its registry after the
+  core has consumed pending work; a theoretical registry mismatch could lose
+  work, so transfer atomicity remains a separate follow-up decision rather than
+  being silently changed here.

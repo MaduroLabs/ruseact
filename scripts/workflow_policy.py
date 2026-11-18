@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Pure policy helpers shared by the Ruseact workflow checks.
+"""Pure policy helpers shared by the manual Ruseact workflow checks.
 
-The privileged workflows import this module only after checking out a trusted
-base-branch revision.  It intentionally contains no GitHub or filesystem I/O;
-that keeps risk classification and gate decisions straightforward to test.
+The CI checks import this module after checking out repository policy. It
+intentionally contains no GitHub or filesystem I/O; that keeps risk
+classification and gate decisions straightforward to test. It does not grant
+merge or promotion authority.
 """
 from __future__ import annotations
 

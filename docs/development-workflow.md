@@ -9,10 +9,11 @@ example applications.
 
 Tasks move through `TASK_READY`, `IMPLEMENTING`, `DOCUMENTING`, `VALIDATING`,
 `SELF_REVIEW`, `PR_OPEN`, `CI_PENDING`, `CI_FAILED` or `CI_PASSED`,
-`AUTO_MERGE_PENDING`, `MERGED_DEVELOP`, `PROMOTING_MAIN`, and
-`PROMOTED_MAIN`. `BLOCKED` and `MANUAL_APPROVAL_REQUIRED` stop the current run
-until the cause is resolved or a human authorizes recovery. The complete state
-transition contract and risk policy live in `AGENTS.md`.
+`MANUAL_APPROVAL_REQUIRED`, `MERGED_DEVELOP`, `PROMOTING_MAIN`, and
+`PROMOTED_MAIN`. Every PR enters `MANUAL_APPROVAL_REQUIRED` after CI; only a
+human may merge it. `BLOCKED` stops the current run until the cause is
+resolved. The complete state-transition contract and risk policy live in
+`AGENTS.md`.
 
 ## Branch and README rules
 
@@ -47,44 +48,36 @@ from trusted changed-file inspection, commit task-scoped paths, push only the
 feature branch, and open a PR targeting `develop` with the README summary,
 acceptance criteria, checks, risk, and limitations.
 
-Low-risk PRs may request GitHub-native squash auto-merge only when required
-checks are enforced and current, required reviews are satisfied, the PR is
-conflict-free, and repository auto-merge is enabled. High-risk PRs—including
+Every PR requires explicit human review and a protected squash merge. CI
+success never authorizes Codex or a workflow to merge. High-risk PRs—including
 workflow, skill, ruleset, permissions, security, ABI, public API, and
 RustReactiveCore architecture changes—require explicit human approval. Labels
 and PR text cannot override the trusted risk policy.
 
-## Trusted automation
+## Manual promotion
 
-`.github/workflows/auto-merge-develop.yml` runs from the trusted base revision
-with `pull_request_target`; it inspects GitHub API metadata and never executes
-PR head code with a write token. It fails closed when repository settings or
-required checks are missing.
+The former `auto-merge-develop.yml` and `promote-main.yml` workflows are
+disabled in GitHub Actions and removed from the repository. No event-driven
+workflow may merge a PR, create a main promotion, or enable native auto-merge.
 
-`.github/workflows/promote-main.yml` consumes one trusted merged-PR event (or
-an explicitly confirmed recovery dispatch), verifies the exact single-parent
-squash SHA is the current `origin/develop` tip, checks for duplicate and
-out-of-order events, and prepares a traceable promotion PR to `main`. It uses
-bounded workflow dispatch for validation because pushes made with
-`GITHUB_TOKEN` do not reliably create downstream workflow runs. It never
-force-pushes, bypasses branch protection, or directly updates a protected
-branch. Native auto-merge and required checks must be configured by repository
-maintainers before automatic promotion can complete.
+`$ruseact-pr-publish` validates the feature branch, updates the README,
+self-reviews the complete diff, commits, pushes, opens a PR targeting `develop`,
+and stops for human review. It never calls `gh pr merge`.
 
-The workflows use concurrency groups to serialize auto-merge and promotion.
-When a newer commit reaches `develop`, the older promotion is stopped rather
-than guessing. Duplicate promotions are recognized by the source SHA and
-cherry-pick trace. Manual recovery uses `$ruseact-main-promote`, which requires
-an exact PR identity and explicit approval; it must not select arbitrary
-`HEAD`.
+`$ruseact-main-promote` runs only after the user supplies one exact merged PR
+number and explicitly confirms completion. It verifies that the PR targets
+`develop`, was squash-merged, has one parent, and that its exact merge SHA is
+the current `origin/develop` tip. It checks duplicate promotion and main
+ruleset state, creates a traceable promotion branch from `main`, cherry-picks
+with `-x`, runs validation, opens a protected PR targeting `main`, and stops.
+The user must merge that promotion PR manually. Direct pushes, force-pushes,
+automatic merge, and arbitrary `HEAD` selection are prohibited.
 
 ## Repository configuration required
 
-The repository currently contains active `develop` and `main` rulesets, but
-activation must be verified by a maintainer. Configure, without weakening
-existing rules:
+The repository contains active `develop` and `main` rulesets. Preserve them
+without weakening existing rules:
 
-- native auto-merge enabled and squash merge allowed;
 - stable required status checks for the `Ruseact CI` jobs, including
   `README documentation` and `Risk classification` where policy requires;
 - at least one required review for implementation PRs and a squash-only
@@ -94,9 +87,10 @@ existing rules:
 - minimal Actions permissions, with privileged workflows limited to trusted
   base-branch code.
 
-Do not modify rulesets or permissions automatically from this repository task.
-If settings cannot be verified, report the exact blocker and leave automation
-in its fail-closed state.
+Native repository auto-merge must remain disabled for this manual policy. Do
+not modify rulesets or permissions automatically from this repository task.
+If settings cannot be verified, report the exact blocker and stop before any
+protected-branch write.
 
 ## Resume and recovery
 

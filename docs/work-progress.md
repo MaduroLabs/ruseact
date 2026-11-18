@@ -2,7 +2,7 @@
 
 ## Branch and baseline
 
-- Branch: `feature/automated-ci-merge-promotion`
+- Branch: `feature/manual-approval-git-workflow`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
 - Last verified on: Linux x86_64, 2026-11-17 for the CI-gated workflow; M1.2 was verified on Linux x86_64, 2026-11-16
 
@@ -21,14 +21,17 @@
 - [x] Added idempotent subscribe/unsubscribe, duplicate-free dependency replacement, signal/computation disposal cleanup, and stale/cross-graph validation.
 - [x] Documented M1.2 dependency ownership and compiler-assisted tracking boundary in `docs/architecture.md`.
 - [x] Added mandatory README maintenance, lifecycle states, conservative risk classification, and fail-closed recovery rules.
-- [x] Added README, risk, trusted API, idempotency, and protected promotion workflow checks.
+- [x] Added README, risk, manual API verification, idempotency, and protected promotion checks.
+- [x] Disabled remote automatic merge and promotion workflows and removed their repository definitions.
+- [x] Reconfigured publication and promotion skills for explicit human approval only.
 
 ## In progress / next
 
 - [ ] Define dirty propagation, batching, and scheduling invariants in the next milestone.
 - [ ] Specify the Rust-to-JavaScript ABI before adding WASM exports.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
-- [ ] Configure and verify GitHub native auto-merge, required checks, and protected main promotion settings after human review.
+- [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
+- [ ] Review and merge this manual-approval workflow configuration PR.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
 
 ## Commands verified
@@ -52,5 +55,6 @@
 - M0 intentionally has no runtime API, compiler, DOM renderer, or complex scheduler.
 - No files are added to the separate `ruseact-examples` repository.
 - The committed `.nvmrc` and CI configuration pin Node `24.22.3` for reproducible CI.
-- GitHub native auto-merge is currently disabled; active rulesets do not yet enforce required status checks, so the new automation remains intentionally fail-closed until maintainers configure those settings.
+- GitHub native auto-merge is disabled; the active `develop` and `main` rulesets enforce required reviews, required CI contexts, and squash merging.
+- Automatic merge and promotion workflow records are disabled in GitHub Actions and their workflow files are removed from the repository. Future promotion requires explicit user invocation and manual merging of the protected promotion PR.
 - Linux verification used the repository-pinned Rust `1.99.0` toolchain and a user-space Ubuntu linker/sysroot because the host did not provide a global `cc` linker; no global packages or repository-generated toolchain files were added.

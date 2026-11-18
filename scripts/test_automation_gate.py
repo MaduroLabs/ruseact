@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Mocked GitHub-event tests for the trusted automation gate."""
+"""Mocked GitHub API tests for the manual promotion verifier."""
 from __future__ import annotations
 
 from copy import deepcopy
 import unittest
 
-from automation_gate import evaluate_auto_merge, evaluate_promotion
+from automation_gate import automatic_merge_blocked, evaluate_promotion
 
 
 REPOSITORY = "MaduroLabs/ruseact"
@@ -118,50 +118,46 @@ def make_api(
 
 class AutomationGateTests(unittest.TestCase):
     def evaluate_auto(self, api: FakeApi) -> dict[str, object]:
+        del api
         decision: dict[str, object] = {}
-        evaluate_auto_merge(api, 8, decision, [])
+        automatic_merge_blocked(decision, [])
         return decision
 
-    def test_low_risk_pr_with_current_gates_is_eligible(self) -> None:
-        self.assertEqual(self.evaluate_auto(make_api())["eligible"], "true")
-
-    def test_failed_ci_is_not_eligible(self) -> None:
-        self.assertEqual(self.evaluate_auto(make_api(check_conclusion="failure"))["eligible"], "false")
-
-    def test_missing_required_checks_is_not_eligible(self) -> None:
-        self.assertEqual(self.evaluate_auto(make_api(required_checks=False))["eligible"], "false")
-
-    def test_missing_readme_is_not_eligible(self) -> None:
-        self.assertEqual(self.evaluate_auto(make_api(readme=False))["eligible"], "false")
-
-    def test_high_risk_pr_is_not_eligible(self) -> None:
-        decision = self.evaluate_auto(make_api(high_risk=True))
-        self.assertEqual(decision["risk"], "HIGH")
+    def test_automatic_merge_is_always_blocked(self) -> None:
+        decision = self.evaluate_auto(make_api())
         self.assertEqual(decision["eligible"], "false")
+        self.assertIn("automatic PR merging is disabled", decision["reason"])
 
     def test_verified_squash_promotion_is_eligible_when_main_is_configured(self) -> None:
         api = make_api(merged=True)
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [])
+        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
         self.assertEqual(decision["eligible"], "true")
 
     def test_newer_develop_commit_blocks_promotion(self) -> None:
         api = make_api(merged=True, develop_sha="4444444444444444444444444444444444444444")
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [])
+        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
         self.assertEqual(decision["eligible"], "false")
 
     def test_non_squash_merge_blocks_promotion(self) -> None:
         api = make_api(merged=True, parent_count=2)
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [])
+        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
         self.assertEqual(decision["eligible"], "false")
 
     def test_unconfigured_main_blocks_promotion(self) -> None:
         api = make_api(merged=True, main_rules=False)
         decision: dict[str, object] = {}
+        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
+        self.assertEqual(decision["eligible"], "false")
+
+    def test_promotion_requires_explicit_completion_confirmation(self) -> None:
+        api = make_api(merged=True)
+        decision: dict[str, object] = {}
         evaluate_promotion(api, 8, SOURCE_SHA, decision, [])
         self.assertEqual(decision["eligible"], "false")
+        self.assertIn("explicit completion confirmation", decision["reason"])
 
 
 if __name__ == "__main__":

@@ -2,11 +2,11 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m2.3-typescript-runtime`
+- Branch: `feature/m2.4-browser-integration`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `89336ba9256467abc2447204cb4f0da24b772554`
-- Last verified on: Linux x86_64, 2026-11-18 for M2.3; M1.1–M1.5 and the
-  reviewed M2.1 ABI design were already merged into this baseline
+- Baseline: `origin/develop` at `64794fcc7067ce88671658d6299bed2557789e27`
+- Last verified on: Linux x86_64, 2026-11-18 for M2.4 local-supported checks;
+  M1.1–M1.5, M2.1, M2.2, M2.2.1, and M2.3 are merged into this baseline
 
 ## Completed
 
@@ -66,6 +66,14 @@
   unknown pending identities.
 - [x] Updated the README, architecture decision, ABI design, and this progress
   record with the M2.3 public contract and M2.4 browser handoff.
+- [x] Preserved the M2.4 browser harness at
+  `scripts/test_browser_runtime.mjs`; it serves generated web bindings, waits
+  for a dynamic HTTP port, and runs bounded real-Chromium assertions.
+- [x] Added the `test:browser` package command and a GitHub-hosted Ubuntu
+  browser job that builds matching web bindings and runs the harness with
+  pinned Node, pnpm, Rust, and `wasm-bindgen` versions.
+- [x] Documented the browser loading path, CI authority, and the InstaBox
+  localhost networking limitation without weakening browser verification.
 
 ## In progress / next
 
@@ -76,7 +84,8 @@
   safe pending-computation handle mapping.
 - [x] Build the M2.3 public TypeScript wrapper; preserve the M2.2 opaque-handle
   and structured-error contract.
-- [ ] Validate browser bundler loading and host integration in M2.4.
+- [ ] Validate browser bundler loading and host integration in M2.4; the
+  authoritative Chromium job runs after the feature PR is published.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -162,6 +171,12 @@
   initialization, scalar and equality behavior, dependency atomicity, nested
   batching, FIFO registry mapping, disposal, generation reuse, cross-instance
   rejection, and unknown-identity fail-closed behavior.
+- M2.4 local-supported validation — browser execution is intentionally not
+  claimed here: the InstaBox Chromium process cannot connect to the harness's
+  loopback HTTP server and the server receives no browser requests. The
+  browser harness syntax, web-bindings preparation, Rust checks, TypeScript
+  checks, Node/WASM regression path, and policy checks are run locally; real
+  browser assertions are authoritative only on the GitHub-hosted Ubuntu job.
 
 ## Blockers / decisions
 
@@ -197,3 +212,8 @@
   the underlying M2.2 drain remains destructive before its bridge-registry
   consistency check. No unapproved rollback or acknowledgement protocol was
   introduced in M2.3.
+- M2.4 cannot complete its browser acceptance criteria from this InstaBox
+  because Chromium cannot reach local HTTP servers. The GitHub-hosted
+  `Browser (chromium)` job is the required execution environment; its actual
+  Chromium version and assertion count must be recorded from the CI result
+  before claiming browser verification.

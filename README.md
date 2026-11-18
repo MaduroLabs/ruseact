@@ -39,11 +39,12 @@ API compatibility is claimed.
 | M1.4 — Batching            | Complete        |
 | M1.5 — Core verification and benchmark baseline | Complete |
 | M2.1 — WASM ABI design | Reviewed and approved |
-| M2.2 — Rust WASM exports | Implemented; pending review |
-| M2.2.1 — Computation identity bridge | Implemented; pending review |
-| M2.3 — TypeScript runtime bridge | Implemented; pending review |
+| M2.2 — Rust WASM exports | Complete |
+| M2.2.1 — Computation identity bridge | Complete |
+| M2.3 — TypeScript runtime bridge | Complete |
+| M2.4 — Browser and WASM integration testing | In progress; authoritative browser verification runs in GitHub Actions |
 | Scheduling and execution   | Not implemented |
-| WASM integration           | M2.3 Node/WASM runtime implemented; browser bundler integration not implemented |
+| WASM integration           | M2.3 Node/WASM runtime implemented; M2.4 browser verification is in progress |
 | DOM renderer               | Not implemented |
 | Compiler integration       | Not implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
@@ -123,6 +124,39 @@ cargo bench -p ruseact-core --bench core_baseline --locked -- --nocapture
 
 These commands verify the workspace and current Rust core; they are not a
 consumer application quickstart.
+
+## M2.4 browser and WASM integration
+
+M2.4 adds a real Chromium harness for the existing TypeScript runtime. The
+harness serves a temporary `wasm-bindgen --target web` module over HTTP, loads
+it through `createReactiveCore(loadWasm)`, and checks scalar signals,
+dependencies, batching, pending-computation identity mapping, instance
+isolation, structured errors, and explicit disposal. It does not render DOM,
+execute computations, or add scheduling behavior.
+
+The reproducible local preparation is:
+
+```bash
+cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+wasm-bindgen target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+  --target web --out-dir target/m2.4-browser-bindgen
+RUSEACT_BROWSER_BINDGEN_OUT="$PWD/target/m2.4-browser-bindgen" \
+  corepack pnpm test:browser
+```
+
+The browser job in `.github/workflows/agent-config-check.yml` repeats this
+build on a GitHub-hosted `ubuntu-latest` runner using the pinned Node, pnpm,
+Rust, and `wasm-bindgen` versions, then runs Chromium against the temporary
+HTTP server. That hosted job is the authoritative browser verification
+environment. The current InstaBox cannot route Chromium requests to a local
+HTTP server, so an unsuccessful local browser launch is not reported as a
+browser pass or a runtime failure. The repository currently claims only the
+tested Chromium configuration; it does not claim broad cross-browser or
+bundler compatibility.
+
+After a successful browser CI run, the branch remains subject to normal manual
+review and protected-branch workflow. M2.5 will define performance
+measurements; M2.4 makes no rendering or WASM performance claims.
 
 ## M1.5 core verification and benchmark baseline
 

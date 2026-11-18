@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m1.5-core-verification`
+- Branch: `feature/m2.1-wasm-abi-design`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `36e75b2efedf7c5b2f2a662c60a699ad134fef59`
-- Last verified on: Linux x86_64, 2026-11-18 for M1.5; M1.1–M1.4 were already merged into this baseline
+- Baseline: `origin/develop` at `e4310e8a554a2cc28130bbd33862c11a19b08f2f`
+- Last verified on: Linux x86_64, 2026-11-18 for M2.1; M1.1–M1.5 were already merged into this baseline
 
 ## Completed
 
@@ -35,10 +35,15 @@
 - [x] Added README, risk, manual API verification, idempotency, and protected promotion checks.
 - [x] Disabled remote automatic merge and promotion workflows and removed their repository definitions.
 - [x] Reconfigured publication and promotion skills for explicit human approval only.
+- [x] Audited the M1 RustReactiveCore APIs and the currently empty WASM and TypeScript package boundaries for M2.1.
+- [x] Added the documentation-only M2.1 WASM ABI proposal covering handles, values, ownership, errors, pending-ID transfer, validation, and performance measurement.
+- [x] Recorded M2.1 alternatives and decisions requiring human architecture approval; no runtime code or dependency was added.
 
 ## In progress / next
 
-- [ ] Specify the Rust-to-JavaScript ABI before adding WASM exports.
+- [x] Specify the Rust-to-JavaScript ABI before adding WASM exports.
+- [ ] Obtain human approval for the M2.1 open decisions before implementing M2.2.
+- [ ] Implement and test the approved WASM bridge in M2.2; do not begin from this proposal without approval.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -60,6 +65,9 @@
 - `python3 -m py_compile scripts/workflow_policy.py scripts/validate_readme_update.py scripts/classify_changed_files.py scripts/automation_gate.py scripts/test_workflow_policy.py` — PASS.
 - `git diff --check` — PASS.
 
+- `git fetch origin --prune` — PASS; `origin/develop` verified at `e4310e8a554a2cc28130bbd33862c11a19b08f2f`.
+- `git switch -c feature/m2.1-wasm-abi-design origin/develop` — PASS; clean documentation-only feature branch created.
+
 - `cargo fmt --all -- --check` — PASS (Linux; Rust `1.99.0`, M1.3 v2).
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` — PASS (Linux; Rust `1.99.0`, M1.3 v2).
 - `cargo test -p ruseact-core --locked` — PASS; 22 core unit tests, 0 doc tests (Linux; Rust `1.99.0`, M1.3 v2).
@@ -79,6 +87,14 @@
 - `cargo check --workspace --target wasm32-unknown-unknown --locked` — PASS (Linux; Rust `1.99.0`, M1.5).
 - `cargo bench -p ruseact-core --bench core_baseline --locked -- --nocapture` — PASS; five measured trials after two warmups for each of 33 operation/size cases. Results: `docs/benchmarks/m1.5-core-baseline.md`.
 
+- M2.1 documentation-only validation — PASS: `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo test --workspace --locked` (35 core tests; 0 WASM tests; 0 doc
+  tests), `cargo check --workspace --target wasm32-unknown-unknown --locked`,
+  `pnpm typecheck` (host Node `22.23.3`), `git diff --check`,
+  `python3 scripts/validate_skills.py`, `python3 scripts/test_workflow_policy.py`,
+  and `python3 scripts/test_automation_gate.py`.
+
 ## Blockers / decisions
 
 - M0 intentionally has no runtime API, compiler, DOM renderer, or complex scheduler.
@@ -89,3 +105,4 @@
 - GitHub native auto-merge is disabled; the active `develop` and `main` rulesets enforce required reviews, required CI contexts, and squash merging.
 - Automatic merge and promotion workflow records are disabled in GitHub Actions and their workflow files are removed from the repository. Future promotion requires explicit user invocation and manual merging of the protected promotion PR.
 - Linux verification used the repository-pinned Rust `1.99.0` toolchain and a user-space Ubuntu linker/sysroot because the host did not provide a global `cc` linker; no global packages or repository-generated toolchain files were added.
+- M2.1 is design-only: no `wasm-bindgen` exports, JS wrappers, value adapters, or bridge dependencies exist yet. The proposed graph-disposal boundary, handle wire layout, value/equality policy, error surface, and worker-transfer policy require explicit human architecture approval before M2.2.

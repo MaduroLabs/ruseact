@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m2.2.1-computation-identity`
+- Branch: `feature/m2.3-typescript-runtime`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `f24d3bd1946710bd23d4beb276ade3534bc0ff8a`
-- Last verified on: Linux x86_64, 2026-11-18 for M2.2.1; M1.1–M1.5 and the
+- Baseline: `origin/develop` at `89336ba9256467abc2447204cb4f0da24b772554`
+- Last verified on: Linux x86_64, 2026-11-18 for M2.3; M1.1–M1.5 and the
   reviewed M2.1 ABI design were already merged into this baseline
 
 ## Completed
@@ -56,6 +56,16 @@
   assertions for the new export.
 - [x] Documented the M2.3 per-instance handle-registry handoff and the
   prohibition on numeric handle construction.
+- [x] Implemented the M2.3 TypeScript runtime bridge with explicit generated
+  WASM-module loading, opaque instance-owned handles, scalar operations,
+  dependency management, batching, normalized errors, and deterministic
+  pending-computation registry resolution.
+- [x] Added a real Node/WASM integration harness covering initialization,
+  multiple instances, scalar validation/equality, dependencies, nested
+  batching, FIFO identity mapping, disposal, generation reuse, and fail-closed
+  unknown pending identities.
+- [x] Updated the README, architecture decision, ABI design, and this progress
+  record with the M2.3 public contract and M2.4 browser handoff.
 
 ## In progress / next
 
@@ -64,8 +74,9 @@
 - [x] Implement and test the approved WASM bridge in M2.2.
 - [x] Add the narrowly scoped M2.2.1 computation identity bridge needed for
   safe pending-computation handle mapping.
-- [ ] Build the M2.3 public TypeScript wrapper; preserve the M2.2 opaque-handle
+- [x] Build the M2.3 public TypeScript wrapper; preserve the M2.2 opaque-handle
   and structured-error contract.
+- [ ] Validate browser bundler loading and host integration in M2.4.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -144,6 +155,13 @@
   scripts/test_wasm_bridge.mjs`. The smoke test passed identity retrieval,
   pair-format compatibility, wrong-kind, foreign-instance, stale-handle, and
   post-disposal rejection scenarios without changing pending FIFO behavior.
+- M2.3 TypeScript validation — PASS: pinned `corepack pnpm install
+  --frozen-lockfile`, `corepack pnpm typecheck`, and
+  `RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.3-baseline-bindgen corepack pnpm
+  test:runtime`. The real generated Node/WASM integration test passed runtime
+  initialization, scalar and equality behavior, dependency atomicity, nested
+  batching, FIFO registry mapping, disposal, generation reuse, cross-instance
+  rejection, and unknown-identity fail-closed behavior.
 
 ## Blockers / decisions
 
@@ -171,3 +189,11 @@
   core has consumed pending work; a theoretical registry mismatch could lose
   work, so transfer atomicity remains a separate follow-up decision rather than
   being silently changed here.
+- M2.3 uses an explicit generated-module loader because no WASM artifact is
+  committed and browser bundler initialization is deferred to M2.4. The host
+  Node is `22.23.3`; the repository pin remains Node `24.22.3`, while
+  `corepack pnpm` provided the pinned pnpm `12.16.1` for verification.
+- The TypeScript wrapper fails closed on malformed or unknown pending pairs, but
+  the underlying M2.2 drain remains destructive before its bridge-registry
+  consistency check. No unapproved rollback or acknowledgement protocol was
+  introduced in M2.3.

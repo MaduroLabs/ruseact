@@ -1,6 +1,12 @@
-/**
- * Public TypeScript/JSX package boundary.
- *
- * Runtime and compiler exports are intentionally deferred beyond M0.
- */
-export {};
+export { ComputationHandle, SignalHandle } from "./handles.js";
+export { createReactiveCore } from "./runtime.js";
+export type {
+  CoreError,
+  CoreErrorKind,
+  CoreResult,
+  ReactiveCore,
+  SignalUpdate,
+  SupportedScalar,
+  WasmModule,
+  WasmModuleLoader,
+} from "./types.js";

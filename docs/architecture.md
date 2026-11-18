@@ -168,3 +168,34 @@ disposal removes dependency edges without fabricating stale computation IDs.
 Batching adds no computation execution, scheduling priority, concurrent
 rendering, effect execution, JavaScript callback, DOM, compiler, or WASM ABI
 behavior.
+
+## Decision 10: M1.5 verification and native baseline
+
+M1.5 adds verification coverage and a manually runnable benchmark harness; it
+does not add runtime behavior. Core tests include an independent deterministic
+reference model for mixed signal writes, dependency replacement, subscription
+churn, queue draining, and nested batches. Test-only invariant checks inspect
+both directions of every dependency edge, live pending IDs, dirty flags,
+active-slot counts, graph identity, and generation validity. A separate
+lifecycle stress test exercises 256 signal/computation allocation and disposal
+cycles, including cross-graph handle rejection and slot generation changes.
+
+The benchmark at
+`crates/ruseact-core/benches/core_baseline.rs` uses only the standard library
+and is registered as a custom Cargo bench target. It runs five measured trials
+after two warmups for 16-, 64-, and 256-signal fixtures. It reports creation,
+read, changed and unchanged write, subscription, unsubscription, dependency
+replacement, dirty-propagation plus drain, pending-queue drain, batched update,
+and computation-cleanup timings. Setup is excluded from timed sections where
+the fixture can be prepared independently; the benchmark records operation
+counts and affected computations so results can be reproduced and compared
+within the same Rust-native environment.
+
+The measured results are a baseline for this implementation, not a performance
+claim against another framework. The design implies linear work in the number
+of affected subscribers for propagation and in the pending queue for draining.
+Dependency replacement and disposal additionally scan `Vec`-backed edge lists;
+their graph-size behavior is recorded as an architectural finding rather than
+optimized speculatively. Browser, JavaScript, WASM-bridge, DOM-commit, memory,
+and end-to-end application performance remain unmeasured until those layers
+exist.

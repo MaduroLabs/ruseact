@@ -9,3 +9,7 @@ description = "Platform-independent RustReactiveCore foundation for Ruseact"
 
 [lib]
 path = "src/lib.rs"
+
+[[bench]]
+name = "core_baseline"
+harness = false

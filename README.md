@@ -38,6 +38,7 @@ API compatibility is claimed.
 | M1.3 — Dirty propagation | Complete        |
 | M1.4 — Batching            | Complete        |
 | M1.5 — Core verification and benchmark baseline | Complete |
+| M2.1 — WASM ABI design | Design proposal; implementation pending review |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | Not implemented |
 | DOM renderer               | Not implemented |
@@ -68,7 +69,8 @@ The Rust reactive core supports:
   benchmarks.
 
 Computation execution, automatic dependency tracking, and scheduling are not
-yet implemented.
+yet implemented. The M2.1 WASM ABI is documented as a design proposal only;
+no WASM exports or JavaScript runtime bridge are implemented.
 
 ## Repository structure
 
@@ -77,6 +79,12 @@ yet implemented.
 - `packages/ruseact` — Future TypeScript/JSX framework interface.
 - `packages/ruseact-dom` — Future DOM integration.
 - `docs` — Architecture decisions and technical documentation.
+
+The [M2.1 WASM ABI design](docs/wasm-abi-design.md) documents the proposed
+handle, value, ownership, error, and pending-work contracts for a future
+bridge. It also defines the validation and performance plans for later M2
+milestones. The proposal requires human architecture approval before any
+WASM exports are added.
 
 Example applications are maintained in a separate repository.
 

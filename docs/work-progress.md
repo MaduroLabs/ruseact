@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m1.4-batching`
+- Branch: `feature/m1.5-core-verification`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `e837416`
-- Last verified on: Linux x86_64, 2026-11-18 for M1.4; M1.3 was verified on Linux x86_64, 2026-11-18
+- Baseline: `origin/develop` at `36e75b2efedf7c5b2f2a662c60a699ad134fef59`
+- Last verified on: Linux x86_64, 2026-11-18 for M1.5; M1.1–M1.4 were already merged into this baseline
 
 ## Completed
 
@@ -27,6 +27,10 @@
 - [x] Implemented M1.4 explicit nested batching with checked depth, gated draining, preserved queue ordering, and safe boundary errors.
 - [x] Added deterministic M1.4 tests for single and nested batches, active-batch drains, deduplication, unchanged writes, disposal, invalid boundaries, consecutive batches, and post-batch updates.
 - [x] Documented M1.4 lifecycle, nested semantics, drain behavior, error handling, and deferred execution responsibilities in `docs/architecture.md` and `README.md`.
+- [x] Added M1.5 invariant checks for bidirectional dependency edges, live pending IDs, dirty flags, active-slot counts, and generation validity.
+- [x] Added M1.5 atomic dependency-replacement failure coverage, a 1,500-operation deterministic reference-model stress test, and 256-cycle lifecycle/identity churn coverage.
+- [x] Added the dependency-free `core_baseline` Cargo benchmark for signal, dependency, dirty-queue, batching, and cleanup operations at 16-, 64-, and 256-signal sizes.
+- [x] Documented M1.5 verification coverage, measured native benchmark results, architecture findings, and limitations.
 - [x] Added mandatory README maintenance, lifecycle states, conservative risk classification, and fail-closed recovery rules.
 - [x] Added README, risk, manual API verification, idempotency, and protected promotion checks.
 - [x] Disabled remote automatic merge and promotion workflows and removed their repository definitions.
@@ -34,11 +38,10 @@
 
 ## In progress / next
 
-- [ ] Define M1.5 benchmark and stress-test scope separately; do not begin it in this branch.
 - [ ] Specify the Rust-to-JavaScript ABI before adding WASM exports.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
-- [ ] Review and merge this manual-approval workflow configuration PR.
+- [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
 
 ## Commands verified
@@ -69,12 +72,20 @@
 - `cargo test --workspace --locked` — PASS; 32 core tests, 0 WASM tests, 0 doc tests (Linux; Rust `1.99.0`, M1.4).
 - `cargo check --workspace --target wasm32-unknown-unknown --locked` — PASS (Linux; Rust `1.99.0`, M1.4).
 
+- `cargo fmt --all -- --check` — PASS (Linux; Rust `1.99.0`, M1.5).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` — PASS (Linux; Rust `1.99.0`, M1.5).
+- `cargo test -p ruseact-core --locked` — PASS; 35 core tests, 0 doc tests (Linux; Rust `1.99.0`, M1.5).
+- `cargo test --workspace --locked` — PASS; 35 core tests, 0 WASM tests, 0 doc tests (Linux; Rust `1.99.0`, M1.5).
+- `cargo check --workspace --target wasm32-unknown-unknown --locked` — PASS (Linux; Rust `1.99.0`, M1.5).
+- `cargo bench -p ruseact-core --bench core_baseline --locked -- --nocapture` — PASS; five measured trials after two warmups for each of 33 operation/size cases. Results: `docs/benchmarks/m1.5-core-baseline.md`.
+
 ## Blockers / decisions
 
 - M0 intentionally has no runtime API, compiler, DOM renderer, or complex scheduler.
 - No files are added to the separate `ruseact-examples` repository.
 - The committed `.nvmrc` and CI configuration pin Node `24.22.3` for reproducible CI.
 - M1.4 exposes batch boundaries only; it does not execute computations or define scheduling priority, compiler tracking, DOM behavior, or a WASM ABI.
+- M1.5 found no correctness defect in the established M1.1–M1.4 APIs. The benchmark records Rust-native microbehavior only; dependency replacement and disposal retain `Vec`-scan complexity and were not speculatively optimized.
 - GitHub native auto-merge is disabled; the active `develop` and `main` rulesets enforce required reviews, required CI contexts, and squash merging.
 - Automatic merge and promotion workflow records are disabled in GitHub Actions and their workflow files are removed from the repository. Future promotion requires explicit user invocation and manual merging of the protected promotion PR.
 - Linux verification used the repository-pinned Rust `1.99.0` toolchain and a user-space Ubuntu linker/sysroot because the host did not provide a global `cc` linker; no global packages or repository-generated toolchain files were added.

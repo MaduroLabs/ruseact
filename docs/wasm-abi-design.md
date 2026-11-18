@@ -545,3 +545,53 @@ It must never infer identity from allocation order or construct a handle from a
 raw pair. An unknown pending pair is an internal consistency failure and must
 not be ignored or mapped to another computation. M2.2.1 documents this
 contract only; it does not implement the TypeScript registry or public runtime.
+
+## 17. M2.3 TypeScript runtime implementation
+
+M2.3 implements the approved wrapper boundary in `packages/ruseact` without
+changing the Rust ABI. The public entry point is:
+
+```ts
+createReactiveCore(loadWasm: WasmModuleLoader):
+  Promise<CoreResult<ReactiveCore>>
+```
+
+The caller supplies a loader for the generated wasm-bindgen ES module. This is
+intentional: generated WASM is a verification/build output rather than a
+committed package asset, and browser bundler loading is deferred to M2.4. The
+runtime validates the loaded constructor and required methods before retaining
+the bridge instance.
+
+The synchronous runtime API provides typed `SignalHandle<T>` and
+`ComputationHandle` wrappers plus signal create/read/write/dispose, computation
+dispose, dependency subscription and replacement, nested batch boundaries,
+pending drain, and graph disposal. Public wrappers contain no writable slot,
+generation, graph, instance, pointer, or generated-binding fields.
+
+The runtime validates supported scalars before every signal boundary and
+normalizes structured wasm-bindgen operational errors to `CoreResult<T>`. It
+returns `"changed"`/`"unchanged"` for writes and preserves Rust equality
+semantics. Internal ABI-shape failures are explicit internal errors; unknown
+non-structured exceptions are thrown rather than silently converted to success.
+
+The computation registry is private to each runtime instance. Creation calls
+`computation_identity()` and records the original legitimate `WasmHandle` using
+the collision-free string key `"slot:generation"`. Drain validates a copied
+`Uint32Array` and even length, then maps each FIFO pair only to an existing
+registered wrapper. Unknown pairs fail closed. Disposal removes registry
+entries only after successful Rust disposal, and graph disposal invalidates and
+frees all retained raw wrappers.
+
+The real verification command is:
+
+```bash
+cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+wasm-bindgen target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+  --target nodejs --out-dir /tmp/ruseact-m2.3-bindgen
+RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.3-bindgen \
+  corepack pnpm test:runtime
+```
+
+This proves the Node/WASM integration path. Browser bundler formats, DOM
+integration, workers, automatic dependency tracking, and computation execution
+remain outside M2.3.

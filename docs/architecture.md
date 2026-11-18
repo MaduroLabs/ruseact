@@ -329,3 +329,65 @@ mismatch is an impossible internal invariant under normal operation, but a
 failure at that point could lose already-drained work. M2.2.1 records this as a
 separate transfer-atomicity issue and does not silently change the established
 drain contract.
+
+## Decision 14: M2.3 TypeScript runtime bridge
+
+M2.3 adds an ergonomic TypeScript boundary over the approved M2.2/M2.2.1
+exports. It does not add a second reactive engine. `ReactiveCore` delegates
+signal storage, equality, dependencies, dirty propagation, batching, and
+pending work to one bridge-owned `WasmCore` instance.
+
+### Initialization and ownership
+
+`createReactiveCore(loadWasm)` is asynchronous and accepts an explicit loader
+for a generated wasm-bindgen ES module. The repository does not commit a WASM
+artifact or select a browser bundler, so the loader keeps Node and future
+browser integration separate without machine-specific paths. Once initialized,
+the public operations are synchronous and return `CoreResult<T>`.
+
+The runtime owns exactly one `WasmCore`. Public signal and computation wrappers
+are non-owning opaque objects. Internal `WeakMap` state associates each wrapper
+with its owning runtime, its raw WASM handle, and its liveness. Strong sets
+hold the internal states only long enough to release raw wasm-bindgen wrappers
+during explicit graph disposal. No `FinalizationRegistry` is a correctness
+mechanism.
+
+### Public values and errors
+
+The runtime accepts only boolean, finite number, and string signal values. It
+rejects `NaN`, infinities, `null`, `undefined`, arrays, objects, functions, and
+symbols before crossing the boundary. Rust remains authoritative for value
+storage and `PartialEq` behavior. Expected bridge exceptions are normalized to
+stable `CoreError` objects with `kind`, `code`, `operation`, and optional
+resource metadata. Internal invariant failures are returned as `kind: "internal"`;
+unknown non-structured exceptions are thrown as unexpected runtime failures.
+
+### Opaque handles and computation registry
+
+`SignalHandle<T>` and `ComputationHandle` have protected constructors and are
+created only by the runtime's internal factories. The package entry point does
+not export those factories or raw WASM classes. Runtime state checks reject
+unknown wrapper objects, foreign runtime ownership, stale resources, and
+post-disposal use before bridge calls; Rust independently validates every raw
+handle.
+
+On computation creation, the runtime calls `computation_identity()` on the
+legitimate raw handle, validates exactly two `Uint32` entries, and registers
+the original handle under a per-instance string key `"slot:generation"`.
+This representation is collision-free for two `u32` values and is never
+exposed as an authenticated public handle. Pending drain pairs are validated
+for `Uint32Array` type and even length, then resolved only through this map in
+FIFO order. An unknown pair is an internal consistency failure; no new WASM
+handle is constructed and no pair is silently skipped.
+
+Disposing a computation first disposes it in Rust, then removes its registry
+entry, invalidates the wrapper, and frees the temporary wasm-bindgen handle.
+Graph disposal invalidates all wrappers, clears registries, frees raw resource
+wrappers, and releases the bridge object. Dependency lists are created for one
+atomic replacement and explicitly freed in a `finally` path.
+
+This milestone intentionally does not implement automatic dependency tracking,
+computation execution, scheduling, DOM rendering, JSX compilation, browser
+bundler packaging, worker transfer, or React Hooks. The M2.4 handoff is a
+browser/bundler integration matrix over this loader boundary, including real
+browser WASM initialization, package output, and host-renderer integration.

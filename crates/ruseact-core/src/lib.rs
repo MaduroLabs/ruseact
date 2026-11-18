@@ -243,6 +243,26 @@ impl fmt::Display for DependencyError {
 
 impl std::error::Error for DependencyError {}
 
+/// Errors returned when an explicit batch boundary is invalid.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BatchError {
+    /// `end_batch` was called without a matching active batch.
+    NotActive,
+    /// The graph cannot represent one more nested batch level.
+    DepthOverflow,
+}
+
+impl fmt::Display for BatchError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotActive => formatter.write_str("no active reactive batch"),
+            Self::DepthOverflow => formatter.write_str("reactive batch depth exhausted"),
+        }
+    }
+}
+
+impl std::error::Error for BatchError {}
+
 struct NodeSlot {
     generation: u32,
     value: Option<Box<dyn Any>>,
@@ -277,11 +297,10 @@ impl ComputationSlot {
 
 /// The graph-owned storage for signals and their generational identities.
 ///
-/// M1.3 adds deterministic dirty propagation and an explicit queue-drain API
-/// to the M1.2 signal storage, computation identity, and bidirectional
-/// dependency metadata. The graph never executes computation bodies or
-/// callbacks; a host may drain the IDs and decide how to process them in a
-/// later milestone.
+/// M1.4 adds explicit nested batch boundaries to the M1.3 deterministic dirty
+/// propagation and queue-drain API. The graph never executes computation
+/// bodies or callbacks; a host may drain the IDs and decide how to process
+/// them in a later milestone.
 pub struct ReactiveGraph {
     graph_id: GraphId,
     slots: Vec<NodeSlot>,
@@ -291,6 +310,7 @@ pub struct ReactiveGraph {
     free_computation_slots: Vec<u32>,
     active_computations: usize,
     pending_computations: Vec<ComputationId>,
+    batch_depth: usize,
 }
 
 impl ReactiveGraph {
@@ -306,6 +326,7 @@ impl ReactiveGraph {
             free_computation_slots: Vec::new(),
             active_computations: 0,
             pending_computations: Vec::new(),
+            batch_depth: 0,
         })
     }
 
@@ -331,6 +352,33 @@ impl ReactiveGraph {
     /// Returns whether this graph owns no live nodes.
     pub const fn is_empty(&self) -> bool {
         self.active_nodes == 0
+    }
+
+    /// Begins an explicit batch.
+    ///
+    /// Dirty propagation still occurs for each changed signal, but pending
+    /// computation IDs cannot be drained until the outermost matching
+    /// [`Self::end_batch`] completes.
+    pub fn begin_batch(&mut self) -> Result<(), BatchError> {
+        self.batch_depth = self
+            .batch_depth
+            .checked_add(1)
+            .ok_or(BatchError::DepthOverflow)?;
+        Ok(())
+    }
+
+    /// Ends one explicit batch nesting level.
+    ///
+    /// Ending an inner batch keeps pending work gated by the outer batch.
+    /// Ending the outermost batch makes existing pending work drainable; it
+    /// does not execute or automatically drain any computation.
+    pub fn end_batch(&mut self) -> Result<(), BatchError> {
+        if self.batch_depth == 0 {
+            return Err(BatchError::NotActive);
+        }
+
+        self.batch_depth -= 1;
+        Ok(())
     }
 
     /// Registers an empty computation metadata record.
@@ -605,10 +653,15 @@ impl ReactiveGraph {
     /// IDs are returned in deterministic first-dirtied order. A computation
     /// dirtied by multiple changed signals or writes before this call appears
     /// once. The returned IDs are only identities: this method does not
-    /// execute a body, callback, render, batch, or other host work. A later
-    /// changed signal may enqueue the same computation again after it has been
-    /// drained.
+    /// execute a body, callback, render, batch, or other host work. While a
+    /// batch is active, this returns an empty vector without consuming pending
+    /// work or clearing dirty flags. A later changed signal may enqueue the
+    /// same computation again after it has been drained.
     pub fn drain_pending_computations(&mut self) -> Vec<ComputationId> {
+        if self.batch_depth != 0 {
+            return Vec::new();
+        }
+
         let pending = std::mem::take(&mut self.pending_computations);
         let mut drained = Vec::with_capacity(pending.len());
 
@@ -1205,6 +1258,202 @@ mod tests {
             Err(SignalError::InvalidNode(target_signal.id()))
         );
         assert!(target.drain_pending_computations().is_empty());
+    }
+
+    #[test]
+    fn a_batch_accumulates_updates_until_the_outermost_end() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(0_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        graph.begin_batch().unwrap();
+        assert_eq!(graph.set(signal, 1), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.set(signal, 2), Ok(SignalUpdate::Changed));
+        assert_eq!(*graph.read(signal).unwrap(), 2);
+        assert!(graph.drain_pending_computations().is_empty());
+
+        graph.end_batch().unwrap();
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn batch_preserves_order_for_shared_subscribers() {
+        let mut graph = ReactiveGraph::new();
+        let first_signal = graph.create_signal(1_u32).unwrap();
+        let second_signal = graph.create_signal(2_u32).unwrap();
+        let first = graph.create_computation().unwrap();
+        let second = graph.create_computation().unwrap();
+        let third = graph.create_computation().unwrap();
+
+        graph.subscribe(first_signal, first).unwrap();
+        graph.subscribe(first_signal, second).unwrap();
+        graph.subscribe(second_signal, second).unwrap();
+        graph.subscribe(second_signal, third).unwrap();
+
+        graph.begin_batch().unwrap();
+        assert_eq!(graph.set(second_signal, 20), Ok(SignalUpdate::Changed));
+        assert_eq!(graph.set(first_signal, 10), Ok(SignalUpdate::Changed));
+        graph.end_batch().unwrap();
+
+        assert_eq!(
+            graph.drain_pending_computations(),
+            vec![second, third, first]
+        );
+    }
+
+    #[test]
+    fn nested_batches_keep_pending_work_gated_until_outer_end() {
+        let mut graph = ReactiveGraph::new();
+        let first_signal = graph.create_signal(1_u32).unwrap();
+        let second_signal = graph.create_signal(2_u32).unwrap();
+        let first = graph.create_computation().unwrap();
+        let second = graph.create_computation().unwrap();
+        graph.subscribe(first_signal, first).unwrap();
+        graph.subscribe(second_signal, second).unwrap();
+
+        graph.begin_batch().unwrap();
+        graph.set(first_signal, 10).unwrap();
+        graph.begin_batch().unwrap();
+        graph.set(second_signal, 20).unwrap();
+        assert!(graph.drain_pending_computations().is_empty());
+        graph.end_batch().unwrap();
+        assert!(graph.drain_pending_computations().is_empty());
+        graph.end_batch().unwrap();
+
+        assert_eq!(graph.drain_pending_computations(), vec![first, second]);
+    }
+
+    #[test]
+    fn draining_during_a_batch_preserves_work_and_dirty_state() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(0_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        graph.begin_batch().unwrap();
+        graph.set(signal, 1).unwrap();
+        assert!(graph.drain_pending_computations().is_empty());
+        graph.set(signal, 2).unwrap();
+        graph.end_batch().unwrap();
+
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+        graph.set(signal, 3).unwrap();
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn nested_batches_deduplicate_work_across_all_levels() {
+        let mut graph = ReactiveGraph::new();
+        let first_signal = graph.create_signal(1_u32).unwrap();
+        let second_signal = graph.create_signal(2_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(first_signal, computation).unwrap();
+        graph.subscribe(second_signal, computation).unwrap();
+
+        graph.begin_batch().unwrap();
+        graph.set(first_signal, 10).unwrap();
+        graph.begin_batch().unwrap();
+        graph.set(first_signal, 11).unwrap();
+        graph.set(second_signal, 20).unwrap();
+        graph.end_batch().unwrap();
+        graph.set(second_signal, 21).unwrap();
+        graph.end_batch().unwrap();
+
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn unchanged_writes_inside_a_batch_do_not_create_work() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(String::from("same")).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        graph.begin_batch().unwrap();
+        assert_eq!(
+            graph.set(signal, String::from("same")),
+            Ok(SignalUpdate::Unchanged)
+        );
+        graph.end_batch().unwrap();
+
+        assert!(graph.drain_pending_computations().is_empty());
+    }
+
+    #[test]
+    fn computation_disposal_during_a_batch_removes_pending_work() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(0_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        graph.begin_batch().unwrap();
+        graph.set(signal, 1).unwrap();
+        graph.dispose_computation(computation).unwrap();
+        assert!(graph.drain_pending_computations().is_empty());
+        graph.end_batch().unwrap();
+        assert!(graph.drain_pending_computations().is_empty());
+    }
+
+    #[test]
+    fn signal_disposal_during_a_batch_cleans_edges_and_keeps_live_work() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(0_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        graph.begin_batch().unwrap();
+        graph.set(signal, 1).unwrap();
+        graph.dispose(signal).unwrap();
+        assert!(
+            graph.computation_slots[computation.index() as usize]
+                .dependencies
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+        graph.end_batch().unwrap();
+
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn invalid_batch_boundaries_preserve_graph_state() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(0_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        assert_eq!(graph.end_batch(), Err(BatchError::NotActive));
+        assert_eq!(graph.set(signal, 1), Ok(SignalUpdate::Changed));
+
+        graph.batch_depth = usize::MAX;
+        assert_eq!(graph.begin_batch(), Err(BatchError::DepthOverflow));
+        assert_eq!(graph.batch_depth, usize::MAX);
+        graph.batch_depth = 0;
+
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+    }
+
+    #[test]
+    fn consecutive_batches_and_outside_updates_remain_independent() {
+        let mut graph = ReactiveGraph::new();
+        let signal = graph.create_signal(0_u32).unwrap();
+        let computation = graph.create_computation().unwrap();
+        graph.subscribe(signal, computation).unwrap();
+
+        graph.begin_batch().unwrap();
+        graph.set(signal, 1).unwrap();
+        graph.end_batch().unwrap();
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+
+        graph.begin_batch().unwrap();
+        graph.set(signal, 2).unwrap();
+        graph.end_batch().unwrap();
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
+
+        graph.set(signal, 3).unwrap();
+        assert_eq!(graph.drain_pending_computations(), vec![computation]);
     }
 
     #[test]

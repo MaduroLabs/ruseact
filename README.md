@@ -36,7 +36,8 @@ API compatibility is claimed.
 | M1.1 — Signal foundation   | Complete        |
 | M1.2 — Dependency tracking | Complete        |
 | M1.3 — Dirty propagation | Complete        |
-| Scheduling and batching    | Not implemented |
+| M1.4 — Batching            | Complete        |
+| Scheduling and execution   | Not implemented |
 | WASM integration           | Not implemented |
 | DOM renderer               | Not implemented |
 | Compiler integration       | Not implemented |
@@ -57,9 +58,11 @@ The Rust reactive core supports:
 - Changed-signal dirty propagation with deterministic, deduplicated pending
   computation IDs.
 - Explicit pending-work draining without computation execution.
+- Explicit nested batching that keeps pending work gated until the outermost
+  batch ends.
 
-Computation execution, automatic dependency tracking, scheduling, and batching
-are not yet implemented.
+Computation execution, automatic dependency tracking, and scheduling are not
+yet implemented.
 
 ## Repository structure
 

@@ -1,8 +1,8 @@
 # Ruseact architecture decisions
 
-This document records the M0 foundation, M1.1 signal, M1.2 dependency, and
-M1.3 dirty-propagation decisions. It describes architecture boundaries,
-constraints, and the runtime contracts completed so far.
+This document records the M0 foundation, M1.1 signal, M1.2 dependency, M1.3
+dirty-propagation, and M1.4 batching decisions. It describes architecture
+boundaries, constraints, and the runtime contracts completed so far.
 
 ## Decision 1: RustReactiveCore is the reactive engine
 
@@ -136,7 +136,35 @@ computation work. Internal enqueue and drain paths validate graph identity and
 computation generation, preserving cross-graph isolation and generational
 safety.
 
-M1.3 has no automatic flush, priority, batching API, concurrent execution,
-callback invocation, mutation intent, WASM ABI, compiler integration, or DOM
-behavior. Those concerns remain later milestones; M1.4 must define batching
-separately rather than being inferred from this queue.
+M1.3 has no automatic flush, priority, concurrent execution, callback
+invocation, mutation intent, WASM ABI, compiler integration, or DOM behavior.
+M1.4 defines batching separately below rather than inferring it from the queue.
+
+## Decision 9: M1.4 deterministic nested batching
+
+M1.4 adds the explicit `ReactiveGraph::begin_batch` and
+`ReactiveGraph::end_batch` boundaries. The graph stores a checked nesting depth;
+`begin_batch` increments it and `end_batch` decrements one level. An
+`end_batch` call without a matching begin returns `BatchError::NotActive`, and
+an increment that would overflow the depth returns `BatchError::DepthOverflow`.
+Neither error mutates graph state or pending work.
+
+Batching does not defer signal writes or dirty marking. Each changed signal
+still stores its final value and marks live subscribers immediately, using the
+M1.3 dirty bit and deterministic FIFO queue. Multiple writes and multiple
+signals therefore retain the existing queue order and deduplication rules.
+Signal values remain readable throughout a batch.
+
+While the batch depth is non-zero, `drain_pending_computations` returns an
+empty vector without taking the pending queue or clearing any dirty bit. An
+inner `end_batch` leaves this gate active. Only the matching outermost
+`end_batch` makes all accumulated pending IDs drainable; ending the batch does
+not automatically drain or execute them. After draining, later writes may
+enqueue the same computation again under the existing M1.3 rules.
+
+Computation and signal disposal retain their M1.3 lifecycle behavior during a
+batch: disposed computations are removed from pending work, and signal
+disposal removes dependency edges without fabricating stale computation IDs.
+Batching adds no computation execution, scheduling priority, concurrent
+rendering, effect execution, JavaScript callback, DOM, compiler, or WASM ABI
+behavior.

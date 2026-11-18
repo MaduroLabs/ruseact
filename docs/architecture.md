@@ -199,3 +199,37 @@ their graph-size behavior is recorded as an architectural finding rather than
 optimized speculatively. Browser, JavaScript, WASM-bridge, DOM-commit, memory,
 and end-to-end application performance remain unmeasured until those layers
 exist.
+
+## Decision 11: M2.1 WASM ABI is a documentation-only proposal
+
+M2.1 defines a candidate boundary between the TypeScript runtime, a future
+`ruseact-wasm` adapter, and the platform-independent RustReactiveCore. The
+focused proposal is in [docs/wasm-abi-design.md](wasm-abi-design.md).
+
+### Verified facts
+
+The current core exposes graph-scoped `NodeId` and `ComputationId` values with
+slot generations, typed signal storage behind `Box<dyn Any>`, explicit
+dependency operations, deterministic pending computation draining, and nested
+batch boundaries. `GraphId` is process-local. The WASM crate has no exports,
+and the TypeScript and DOM packages have placeholder entry points. No current
+WASM or JavaScript ABI is therefore an existing contract.
+
+### Proposal, pending approval
+
+The recommended boundary uses a Rust-owned graph, explicit disposal, opaque
+TypeScript wrappers with an instance owner, fixed-width validated identity
+fields, a closed scalar value set, structured error results, and a copied
+typed-array representation for internal pending-ID transfer. The public API
+must never expose Rust references, pointers, arbitrary `Box<dyn Any>` values,
+or computation callbacks. A bridge must preserve M1 equality, generation,
+dependency, queue-order, and batch-drain behavior.
+
+### Alternatives and open decisions
+
+Packed numbers, structured handles, and opaque wrappers have different size,
+debuggability, and forgery trade-offs. The exact handle layout, scalar value
+tags and number semantics, graph-disposal boundary, error result policy,
+pending-ID wire layout, WASM binding technology, and worker-transfer policy
+require human approval before M2.2. M2.1 does not implement or silently
+choose any of these runtime contracts.

@@ -29,7 +29,7 @@ Every task is tracked through these states:
 
 `TASK_READY` → `IMPLEMENTING` → `DOCUMENTING` → `VALIDATING` →
 `SELF_REVIEW` → `PR_OPEN` → `CI_PENDING` → `CI_FAILED` or `CI_PASSED` →
-`AUTO_MERGE_PENDING` → `MERGED_DEVELOP` → `PROMOTING_MAIN` →
+`MANUAL_APPROVAL_REQUIRED` → `MERGED_DEVELOP` → `PROMOTING_MAIN` →
 `PROMOTED_MAIN`.
 
 `BLOCKED` and `MANUAL_APPROVAL_REQUIRED` are terminal states for the current
@@ -56,16 +56,16 @@ Valid transitions and gates:
   merge around a failure.
 - `CI_PENDING` → `CI_PASSED`: all enforced checks passed for the current PR
   head SHA and the required README gate passed.
-- `CI_PASSED` → `AUTO_MERGE_PENDING`: only a low-risk PR with enforced required
-  checks, required reviews, squash-only policy, no conflict, and native
-  auto-merge enabled may enter this state.
-- `CI_PASSED` → `MANUAL_APPROVAL_REQUIRED`: high-risk, ambiguous, or
-  infrastructure-sensitive work always takes this transition.
-- `AUTO_MERGE_PENDING` → `MERGED_DEVELOP`: GitHub performs a native squash
-  merge after its ruleset gates pass. The agent never merges its own PR.
-- `MERGED_DEVELOP` → `PROMOTING_MAIN`: a trusted event or an explicitly
-  authorized recovery identifies one exact merged PR and its squash SHA; the
-  SHA is the current tip of `origin/develop` and is not already on `main`.
+- `CI_PASSED` → `MANUAL_APPROVAL_REQUIRED`: every PR takes this transition.
+  CI success never authorizes an agent or workflow to merge. A human must
+  review and squash-merge the PR through GitHub's protected `develop` path.
+- `MANUAL_APPROVAL_REQUIRED` → `MERGED_DEVELOP`: only after the human has
+  merged the PR and the merge is visible in GitHub. The agent never merges an
+  implementation PR and no workflow requests native auto-merge.
+- `MERGED_DEVELOP` → `PROMOTING_MAIN`: only after the user explicitly invokes
+  `$ruseact-main-promote`, provides the exact merged PR number, and confirms
+  that the task is complete. The exact squash SHA must be the current tip of
+  `origin/develop` and must not already be on `main`.
 - `PROMOTING_MAIN` → `PROMOTED_MAIN`: the verified commit passes main
   validation and is accepted through the configured protected promotion path.
 - Any failed safety check, ambiguous identity, API outage after bounded retry,
@@ -114,17 +114,17 @@ For every task:
 5. Commit the completed changes and push only the feature branch.
 6. Open a PR targeting `develop` with the head SHA, base SHA, acceptance
    criteria, README summary, checks, risk classification, and limitations.
-7. Wait for enforced CI and review gates. Low-risk PRs may request GitHub
-   native squash auto-merge; high-risk PRs require explicit human approval.
+7. Wait for enforced CI and review gates. A human must manually squash-merge
+   the implementation PR through GitHub. Codex and repository workflows must
+   never enable auto-merge or merge the implementation PR.
 
-The trusted `auto-merge-develop.yml` workflow checks changed paths and GitHub
-API state from a trusted base revision. It does not execute PR head code with a
-write token, does not trust labels or PR text as authorization, and fails
-closed when required checks or native auto-merge are not configured. The
-`promote-main.yml` workflow verifies one exact merged squash SHA and creates a
-promotion PR to `main`; it does not bypass protected branches or directly push
-around rulesets. GITHUB_TOKEN event suppression is handled with explicit,
-bounded workflow dispatch for promotion validation and a manual recovery path.
+The former `auto-merge-develop.yml` and `promote-main.yml` workflows are
+disabled in GitHub Actions and removed from the repository. They must not be
+reintroduced as event-driven automation. `ruseact-pr-publish` stops after
+opening the PR. `$ruseact-main-promote` is a manual, user-invoked recovery and
+promotion helper only; it verifies one exact squash SHA, prepares a protected
+promotion PR to `main`, and stops for a human merge. Neither path bypasses
+branch protection or directly updates a protected branch.
 
 ### Risk classification and approval
 
@@ -147,13 +147,14 @@ not auto-merge or auto-promote itself.
 
 ### Human approval and main promotion
 
-No implementation task pushes directly to `main`, and no agent merges its own
-PR. Promotion requires an actually merged, squash-only PR, the exact GitHub
-merge SHA, a current `origin/develop` tip match, duplicate-promotion checks,
-main validation, and a protected promotion path. If a direct push would bypass
-branch protection, use the promotion PR path or stop and report the blocker.
-Never force-push, rewrite shared history, reset or discard local work, or
-silently select whichever commit happens to be `HEAD`.
+No implementation task pushes directly to `main`, and no agent or workflow
+merges any PR automatically. Promotion requires an actually merged,
+squash-only PR, the exact GitHub merge SHA, a current `origin/develop` tip
+match, duplicate-promotion checks, main validation, and a protected promotion
+PR. If a direct push would bypass branch protection, use the promotion PR path
+and stop for the user's manual merge, or report the blocker. Never force-push,
+rewrite shared history, reset or discard local work, or silently select
+whichever commit happens to be `HEAD`.
 
 After a successful promotion, return to a clean synchronized `develop`. If the
 PR uses a merge commit, rebase merge, multiple ambiguous commits, a stale SHA,

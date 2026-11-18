@@ -40,7 +40,7 @@ API compatibility is claimed.
 | WASM integration           | Not implemented |
 | DOM renderer               | Not implemented |
 | Compiler integration       | Not implemented |
-| CI-gated development workflow | Implemented fail-closed; GitHub activation settings pending |
+| Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
 ### Currently implemented
 
@@ -87,14 +87,15 @@ python3 scripts/validate_skills.py
 These commands verify the workspace and current Rust core; they are not a
 consumer application quickstart.
 
-## Autonomous development workflow
+## Manual-approval development workflow
 
-Ruseact uses a fail-closed workflow for approved development tasks:
+Ruseact uses a strictly manual, protected workflow for every development task:
 
 ```text
 Task → feature branch from develop → implementation → README update →
-validation → self-review → PR to develop → required CI → squash merge →
-verified promotion PR to main → main validation → return to develop
+validation → self-review → PR to develop → required CI → human squash merge →
+explicit main-promotion request → verified promotion PR to main →
+human squash merge → return to develop
 ```
 
 Every new implementation task, milestone, and sub-milestone must update this
@@ -108,37 +109,32 @@ The repository provides these workflow components:
 - `Ruseact CI` runs Rust formatting, Clippy, workspace tests, WASM checks,
   TypeScript checks, skill validation, risk classification, and the README
   gate.
-- `Ruseact Auto Merge Develop` inspects trusted GitHub metadata and changed
-  paths. Only low-risk PRs with enforced current checks, required reviews,
-  squash-only policy, no conflicts, and native auto-merge enabled may request
-  GitHub-native squash auto-merge.
-- `Ruseact Promote Main` verifies one exact squash merge from `develop`,
-  prevents duplicate or out-of-order promotion, creates a traceable promotion
-  PR to `main`, dispatches bounded validation when needed, and requests native
-  squash auto-merge. It never bypasses branch protection.
+- The former `auto-merge-develop.yml` and `promote-main.yml` workflows are
+  disabled in GitHub Actions and removed from the repository. They have no
+  event-driven merge or promotion authority.
 
-Use `$ruseact-pr-publish` to validate and publish a feature branch. Use
-`$ruseact-main-promote` for authorized manual recovery when a trusted
-promotion event is missed or a promotion needs human-controlled verification.
-Inspect the GitHub Actions run summary, PR checks, source squash SHA, and
-promotion PR before taking recovery action. To stop automation, disable the
-corresponding workflows or remove the repository ruleset configuration through
-an authorized GitHub administrator; do not edit around a failed check.
+Use `$ruseact-pr-publish` to validate and publish a feature branch. It commits,
+pushes the feature branch, opens a PR targeting `develop`, records the checked
+SHA, and then stops. Codex must never merge that PR or enable auto-merge.
 
-The workflows intentionally remain inactive for automatic merging or promotion
-until repository settings are configured. At the time of this documentation,
-native auto-merge is disabled and the active `develop` and `main` rulesets do
-not enforce required status checks. Maintainers must enable native auto-merge,
-configure stable required checks for the CI jobs, require squash merges, and
-configure a protected promotion path for `main`. The automation fails closed
-until those settings are present. This configuration PR itself changes
-repository policy, skills, and privileged workflows, so it requires explicit
-human review and must not auto-merge or auto-promote.
+Use `$ruseact-main-promote` only after explicitly providing the merged PR
+number and confirming that the task is complete. The skill verifies the exact
+single-parent squash SHA, confirms it is the current `origin/develop` tip,
+checks for duplicate promotion, creates a traceable promotion branch and PR to
+`main`, validates it, and stops for the user's manual merge. It never selects
+arbitrary `HEAD`, directly pushes `main`, or enables auto-merge.
 
-For recovery, preserve the worktree and remote history, record the PR number,
-source branch, source squash SHA, target branch, resulting main SHA if any,
-and the failed operation. Re-run only after the exact cause is resolved. Never
-force-push, reset shared branches, or select an arbitrary `develop` HEAD.
+CI and branch protection remain enabled. The active `develop` and `main`
+rulesets require review, squash merging, and the configured `Ruseact CI`
+contexts. Repository native auto-merge is disabled. Any future request to
+re-enable merge or promotion automation requires a separate, explicitly
+approved security and repository-settings change.
+
+For a failure, preserve local and remote history and record the PR number,
+source squash SHA, source and target branches, resulting main SHA if any,
+failed operation, and whether a remote write completed. Resolve the cause,
+rerun the exact manual verification, and never force-push, bypass protection,
+or merge around a failed check.
 
 ## Architecture
 

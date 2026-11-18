@@ -41,6 +41,9 @@ expectError(() => first.create_signal({}), "unsupported_value");
 expectError(() => first.set_signal(booleanSignal, "wrong-type"), "type_mismatch");
 
 const computation = first.create_computation();
+assert.deepEqual([...first.computation_identity(computation)], [0, 0]);
+expectError(() => first.computation_identity(numberSignal), "invalid_computation");
+expectError(() => second.computation_identity(computation), "foreign_instance");
 const dependencies = first.create_dependency_list();
 dependencies.push(numberSignal);
 assert.equal(dependencies.len(), 1);
@@ -58,6 +61,7 @@ first.set_signal(numberSignal, 3);
 first.end_batch();
 assert.deepEqual([...first.drain_pending_computations()], []);
 first.end_batch();
+assert.deepEqual([...first.computation_identity(computation)], [0, 0]);
 assert.deepEqual([...first.drain_pending_computations()], [0, 0]);
 
 assert.equal(first.set_signal(numberSignal, 4), true);
@@ -72,6 +76,7 @@ expectError(() => foreignDependencies.push(numberSignal), "foreign_instance");
 
 first.dispose_computation(computation);
 expectError(() => first.dispose_computation(computation), "stale_handle");
+expectError(() => first.computation_identity(computation), "stale_handle");
 first.dispose_signal(numberSignal);
 expectError(() => first.read_signal(numberSignal), "stale_handle");
 first.dispose_signal(booleanSignal);
@@ -79,9 +84,10 @@ first.dispose_signal(stringSignal);
 first.dispose();
 assert.equal(first.disposed, true);
 expectError(() => first.create_signal(false), "disposed_instance");
+expectError(() => first.computation_identity(computation), "disposed_instance");
 expectError(() => first.dispose(), "disposed_instance");
 
 second.dispose_computation(secondComputation);
 second.dispose();
 
-console.log("M2.2 WASM bridge smoke test passed");
+console.log("M2.2.1 WASM bridge identity smoke test passed");

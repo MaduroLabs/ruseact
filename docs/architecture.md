@@ -292,3 +292,40 @@ M2.3 may build ergonomic TypeScript ownership wrappers on top of this bridge;
 it must preserve the opaque-handle and structured-error contracts and add the
 broader real-runtime integration matrix. Browser and worker transfer behavior
 remain unmeasured and unsupported until those milestones are designed.
+
+## Decision 13: M2.2.1 validated computation identity metadata
+
+M2.3 was blocked because the existing `Uint32Array` pending-drain format could
+not be associated with the original opaque computation handles without either
+guessing allocation order or adding an unsafe numeric-handle constructor. The
+approved M2.2.1 extension adds only a validated identity accessor; it does not
+redesign the ABI or change `ruseact-core`.
+
+`WasmCore.computation_identity(computation)` validates the active instance,
+graph, resource kind, slot, generation, and live computation registry through
+the same `validate_computation` path used by computation operations. It returns
+a newly copied `Uint32Array([slot, generation])`. Reading identity metadata is
+non-mutating: it does not alter dependencies, dirty state, or the pending
+queue. The same pair format is therefore available both from a legitimate
+computation handle and from `drain_pending_computations()`.
+
+The pair is metadata scoped to its owning `WasmCore` instance, not an
+authenticated handle. The bridge intentionally does not expose
+`resolve_computation_handle(slot, generation)`, a public handle constructor, or
+writable identity fields. Foreign, stale, wrong-kind, malformed, and
+post-disposal inputs continue to produce the existing structured error codes.
+
+The future M2.3 TypeScript wrapper must register the original opaque handle
+immediately after `create_computation()` by calling `computation_identity()` and
+keying a per-instance map by `(slot, generation)`. It must resolve pending
+pairs only by looking them up in that map, remove entries on computation
+disposal, and clear the map on graph disposal. An unknown pending pair is an
+internal consistency failure and must not be silently dropped or mapped to a
+different handle.
+
+The existing bridge drain implementation still checks its bridge registry
+after the core has returned (and therefore consumed) pending work. A registry
+mismatch is an impossible internal invariant under normal operation, but a
+failure at that point could lose already-drained work. M2.2.1 records this as a
+separate transfer-atomicity issue and does not silently change the established
+drain contract.

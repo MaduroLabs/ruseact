@@ -41,8 +41,9 @@ API compatibility is claimed.
 | M2.1 — WASM ABI design | Reviewed and approved |
 | M2.2 — Rust WASM exports | Implemented; pending review |
 | M2.2.1 — Computation identity bridge | Implemented; pending review |
+| M2.3 — TypeScript runtime bridge | Implemented; pending review |
 | Scheduling and execution   | Not implemented |
-| WASM integration           | M2.2 Rust bridge implemented; TypeScript wrapper not implemented |
+| WASM integration           | M2.3 Node/WASM runtime implemented; browser bundler integration not implemented |
 | DOM renderer               | Not implemented |
 | Compiler integration       | Not implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
@@ -77,24 +78,29 @@ The Rust reactive core supports:
   `(slot, generation)` metadata for an existing live computation handle. The
   accessor is instance-bound and read-only; it does not construct handles from
   caller-provided numeric identities.
+- A TypeScript runtime in `packages/ruseact` with opaque instance-owned signal
+  and computation handles, explicit disposal, scalar validation, dependency
+  operations, nested batching, structured `CoreResult` errors, and safe
+  pending-computation identity resolution.
 
 Computation execution, automatic dependency tracking, and scheduling are not
-yet implemented. The M2.3 TypeScript runtime wrapper, DOM renderer, compiler,
-and worker handle transfer are also not implemented.
+yet implemented. The DOM renderer, compiler, browser bundler matrix, and
+worker handle transfer are also not implemented.
 
 ## Repository structure
 
 - `crates/ruseact-core` — Platform-independent Rust reactive core.
 - `crates/ruseact-wasm` — Rust-to-JavaScript WASM bridge for the approved M2.2
   scalar and reactive-identity ABI.
-- `packages/ruseact` — Future TypeScript/JSX framework interface.
+- `packages/ruseact` — TypeScript runtime bridge and future JSX/compiler
+  interface.
 - `packages/ruseact-dom` — Future DOM integration.
 - `docs` — Architecture decisions and technical documentation.
 
 The [M2.1 WASM ABI design](docs/wasm-abi-design.md) records the reviewed
-handle, value, ownership, error, and pending-work contract. M2.2 implements the
-approved Rust bridge portion; the public TypeScript wrapper remains a later
-M2.3 milestone.
+handle, value, ownership, error, and pending-work contract. M2.2 and M2.2.1
+implement the Rust bridge; M2.3 adds the typed runtime wrapper without
+duplicating the reactive engine.
 
 Example applications are maintained in a separate repository.
 
@@ -192,6 +198,57 @@ The generated bindings and WASM artifact are verification outputs and are not
 committed. See [docs/wasm-abi-design.md](docs/wasm-abi-design.md) for the
 boundary contract and [docs/work-progress.md](docs/work-progress.md) for the
 verified command results and current M2.3 handoff.
+
+## M2.3 TypeScript runtime bridge
+
+`packages/ruseact` exposes `createReactiveCore(loadWasm)`, which asynchronously
+loads a generated `wasm-bindgen` ES module and returns `Promise<CoreResult<ReactiveCore>>`.
+The loader is explicit because generated WASM is not committed and browser
+bundler initialization remains an M2.4 concern:
+
+```ts
+const result = await createReactiveCore(async () => import("./generated/ruseact_wasm.js"));
+if (!result.ok) throw new Error(result.error.code);
+const core = result.value;
+```
+
+After initialization, runtime operations are synchronous and return
+`CoreResult<T>`. The public API includes `createSignal`, `get`, `set`,
+`disposeSignal`, `createComputation`, `disposeComputation`, `subscribe`,
+`unsubscribe`, `replaceDependencies`, `beginBatch`, `endBatch`,
+`drainPendingComputations`, and `dispose`.
+
+Only booleans, finite numbers, and strings are supported. `NaN`, infinities,
+arrays, objects, functions, symbols, `null`, and `undefined` are rejected.
+`set` reports `"changed"` or `"unchanged"`; Rust remains authoritative for
+signal values and equality, including `+0.0 == -0.0`.
+
+Signal and computation handles are opaque TypeScript objects backed by private
+per-instance state. The runtime rejects forged, stale, disposed, and
+cross-instance handles before calling the bridge. Computation creation calls
+`computation_identity()` and stores the original WASM handle in a registry keyed
+by the collision-free string `(slot:generation)`. Pending pairs are resolved
+only to existing registered handles; unknown pairs return an internal failure
+and are never constructed into WASM handles.
+
+Dependency-list wrappers are temporary and explicitly freed after atomic
+replacement. Runtime and resource disposal are explicit; no
+`FinalizationRegistry` is used for correctness. Computations remain metadata
+only: the runtime does not execute callbacks, schedule work, track dependencies
+automatically, render DOM, or compile JSX.
+
+Run the real Node/WASM runtime integration test with generated bindings:
+
+```bash
+cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+wasm-bindgen target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+  --target nodejs --out-dir /tmp/ruseact-m2.3-bindgen
+RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.3-bindgen \
+  corepack pnpm test:runtime
+```
+
+This verifies the Node/WASM loading path and runtime behavior only. Browser
+bundler compatibility and DOM integration are deferred to M2.4.
 
 ## Manual-approval development workflow
 

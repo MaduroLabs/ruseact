@@ -9,6 +9,9 @@ description = "Thin RustReactiveCore to JavaScript/WASM bridge for Ruseact"
 
 [dependencies]
 ruseact-core = { workspace = true }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true }
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]

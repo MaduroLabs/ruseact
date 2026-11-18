@@ -1,12 +1,13 @@
 # M2.1 — WASM ABI design
 
-**Status:** design proposal for human review. No WASM exports, JavaScript
-wrappers, runtime conversions, or new dependencies are implemented by M2.1.
+**Status:** M2.1 design proposal approved for the M2.2 Rust bridge. M2.2
+implements the approved Rust/WASM adapter contract; the public TypeScript
+wrapper and runtime integration remain future work.
 
 This document defines a candidate boundary between the TypeScript runtime, a
-future `crates/ruseact-wasm` adapter, and the platform-independent
-`ruseact-core` graph. It separates facts verified in M1 from recommendations
-that require approval before M2.2.
+`crates/ruseact-wasm` adapter, and the platform-independent `ruseact-core`
+graph. It separates facts verified in M1, the M2.1 recommendations that were
+approved for M2.2, and the remaining future wrapper decisions.
 
 ## 1. Goals and non-goals
 
@@ -52,10 +53,11 @@ contract that a bridge must adapt; they are not themselves a proposed JS API.
 | Disposal | Signal and computation disposal remove relationships and invalidate the current generation. | Use-after-dispose and stale generations must become stable bridge errors. There is currently no public `ReactiveGraph::dispose` method. |
 | Core boundary | The crate forbids unsafe code and imports no browser or JS types. | Ownership and conversion belong in the bridge, not in `ruseact-core`. |
 
-The current `crates/ruseact-wasm` crate contains only its package metadata and
-an intentionally empty library. The `ruseact` and `ruseact-dom` packages also
-contain placeholder entry points. No current export names or generated
-bindings are therefore treated as approved API.
+At the M2.1 baseline the `crates/ruseact-wasm` crate contained only package
+metadata and an intentionally empty library. M2.2 now provides the first
+Rust/WASM exports described in section 15. The `ruseact` and `ruseact-dom`
+packages still contain placeholder entry points; no public TypeScript wrapper
+is treated as implemented by this document.
 
 ## 3. Proposed boundary
 
@@ -107,7 +109,7 @@ also do not make a Rust handle transferable.
 | Structured handle | Makes kind, graph/instance, slot, and generation visible and serializable; easy to inspect in tests. | More bytes and conversion work; callers could forge ordinary object fields unless the bridge validates every field. |
 | Opaque JS wrapper | TypeScript branding and a private owner reference make accidental cross-instance use difficult; ergonomic disposal methods are possible. | Object allocation and wrapper lifetime cost; wrappers are not transferable to another worker and still require Rust-side validation. |
 
-### Recommendation — pending approval
+### Recommendation recorded by M2.1; approved for M2.2
 
 Use opaque, branded TypeScript wrappers that retain a private reference to
 their `CoreInstance`, backed by fixed-width Rust identity fields. The bridge
@@ -144,34 +146,31 @@ stored or compared by the core. The bridge needs an explicit tagged value
 model and a per-signal type descriptor; TypeScript generics alone are erased
 at runtime.
 
-### Candidate MVP mapping — pending approval
+### Candidate MVP mapping — approved for the M2.2 bridge
 
 | JavaScript input | Candidate bridge representation | Required policy |
 | --- | --- | --- |
 | `boolean` | Boolean tag and Rust `bool` | Exact boolean equality. |
-| Safe integer `number` | Integer tag and a signed/unsigned fixed-width Rust type, or an explicitly selected `f64` mode | Reject values outside the selected range. JavaScript numbers are exact integers only through `2^53 - 1`. |
-| Other finite `number` | `f64` tag and Rust `f64` | Choose and document `NaN`, `Infinity`, and signed-zero behavior; do not silently substitute JS `===` for Rust `PartialEq`. |
+| Finite `number` | `f64` tag and Rust `f64` | No separate integer type; reject `NaN`, infinities, and preserve Rust `PartialEq` including signed-zero equality. |
 | `string` | UTF-8 copy and Rust `String` | Conversion allocates; invalid UTF-16/UTF-8 policy must be explicit in the binding. |
-| `null` | Dedicated null tag | Must remain distinct from `undefined`. |
-| `undefined` | Dedicated undefined tag | Must remain distinct from `null`; it may be unsupported for Rust-owned signal storage in the first implementation. |
+| `null` | Rejected in the M2.2 scalar adapter | Reserved for a future value contract; it is not stored in the core. |
+| `undefined` | Rejected in the M2.2 scalar adapter | Reserved for a future value contract; it is not stored in the core. |
 | arrays | Not in MVP, or an explicitly copied/serialized value type | No implicit `Box<dyn Any>` conversion. Element types, cycles, and mutation ownership need a separate contract. |
 | objects | Not in MVP, or an opaque bridge-owned reference with explicit lifetime | Do not retain arbitrary JS objects in the core. Cycles, identity, mutation, and GC interaction are unresolved. |
 
-The conservative recommendation is to start with booleans, an explicitly
-documented integer representation, finite `f64` values, strings, and tagged
-null/undefined only if the core value model supports them without changing
-M1 equality semantics. Arrays and objects should be deferred until a concrete
-ownership and serialization contract is approved.
+The approved M2.2 set is booleans, finite `f64` values, and strings. There is
+no separate integer representation, and `null`, `undefined`, arrays, and
+objects are rejected until a concrete ownership and serialization contract is
+approved for a later milestone.
 
-`NaN` is a deliberate open decision: Rust `PartialEq` generally considers
-`NaN != NaN`, while JavaScript has several equality operations with different
-results. The bridge must preserve the selected Rust signal equality contract
-and test it; it must not normalize values merely to match a JavaScript
+`NaN` and infinities are rejected before they reach the core. For accepted
+numbers, Rust `PartialEq` remains authoritative: `+0.0` and `-0.0` compare
+equal, and the bridge does not normalize values to match a JavaScript
 comparison operator.
 
 ## 6. Ownership and lifecycle
 
-### Recommended model — pending approval
+### Recommended model — approved for M2.2
 
 - The Rust bridge owns one `ReactiveGraph` per `CoreInstance`.
 - TypeScript objects are non-owning handles and do not dispose resources when
@@ -179,9 +178,8 @@ comparison operator.
 - `createReactiveCore()` returns an active instance after WASM initialization.
 - `dispose()` explicitly marks the instance disposed, invalidates all wrapper
   operations, and drops or releases its Rust graph.
-- Signal and computation disposal are explicit and idempotency is defined by
-  the error contract. A second disposal should return a stable
-  `already_disposed`/`invalid_handle` result rather than panic.
+- Signal and computation disposal are explicit. A second disposal returns the
+  stable `stale_handle` result rather than panicking.
 - Slot reuse increments the generation in the existing core; stale wrappers
   therefore remain invalid even if their slot is reused.
 - Graph disposal invalidates every signal and computation wrapper owned by the
@@ -198,8 +196,11 @@ leak reporting after explicit disposal semantics are stable.
 
 ## 7. Error mapping
 
-Expected operational errors should cross the boundary as a discriminated,
-serializable result rather than an unstructured panic. A candidate shape is:
+Expected operational errors cross the boundary as structured data rather than
+an unstructured panic. The internal bridge uses a Rust `Result<T, JsValue>`;
+wasm-bindgen turns an `Err` into a JavaScript exception whose thrown value is
+the structured error object below. This keeps the generated ABI conventional
+while preserving stable, inspectable error codes.
 
 ```ts
 type CoreError = {
@@ -228,7 +229,9 @@ type CoreResult<T> =
   | { ok: false; error: CoreError };
 ```
 
-The exact names are proposed, not approved. `GraphError::IdExhausted`,
+The error codes and fields below are the M2.2 bridge contract. The TypeScript
+wrapper may later decode the thrown object into a result helper.
+`GraphError::IdExhausted`,
 `SignalError::{InvalidNode, TypeMismatch, NodeIdExhausted}`,
 `DependencyError::{InvalidSignal, InvalidComputation,
 ComputationIdExhausted}`, and `BatchError::{NotActive, DepthOverflow}` must
@@ -236,11 +239,10 @@ map deterministically without exposing Rust debug strings as the API. Handle
 details may be included for diagnostics, but raw pointers and memory
 addresses must never be returned.
 
-Expected stale, foreign, disposed, type, and batch errors should be ordinary
-`CoreResult` failures. An unexpected internal invariant violation is distinct:
-the bridge should report a dedicated error and fail closed, with the exact
-panic/exception policy decided before exports are implemented. The adapter
-must never convert an invalid handle into a lookup of a caller-supplied slot.
+Expected stale, foreign, disposed, type, and batch errors are ordinary
+structured failures. An unexpected internal invariant violation is distinct:
+the bridge reports a dedicated error and fails closed. The adapter must never
+convert an invalid handle into a lookup of a caller-supplied slot.
 
 ## 8. Boundary communication and pending work
 
@@ -267,14 +269,15 @@ For `drain_pending_computations()`:
 4. The JS side treats the result as a snapshot. A later signal update may
    enqueue the same computation again after the core has cleared its dirty
    flag.
-5. A bridge error or invalid conversion must not partially acknowledge an
-   untransferred queue. The exact ownership of the temporary transfer buffer
-   is an M2.2 implementation detail and must be tested.
+5. The M2.2 bridge copies the complete core result into a temporary Rust
+   vector before constructing the JS-owned typed array. The bridge does not
+   expose a recoverable per-item conversion path; an impossible registry
+   mismatch is treated as `internal_invariant` and fails closed.
 
 Typed arrays reduce object allocation for large queues, but a public raw array
 would make forging handles easier. The recommended split is a compact typed
 array internally and validated opaque computation handles in the public
-TypeScript layer. This is a design hypothesis, not a measured performance
+TypeScript layer. This remains a design hypothesis, not a measured performance
 result.
 
 ## 9. Candidate TypeScript API
@@ -413,20 +416,22 @@ application performance from this plan.
   call.
 - Supporting arbitrary objects would couple core storage to JS/GC semantics;
   deferring them keeps the M1 core independent but limits the first API.
-- A result-based error API is verbose at call sites but makes expected invalid
-  handle and lifecycle failures testable without exception control flow.
+- Structured thrown error objects make expected invalid-handle and lifecycle
+  failures inspectable while retaining the conventional wasm-bindgen `Result`
+  ABI.
 - A bridge-owned graph lifetime is deterministic, but the missing public core
   graph-disposal API must be resolved before resource reclamation is claimed.
 
-## 13. Open decisions requiring human approval
+## 13. M2.1 open decisions (resolved for M2.2)
 
-Before M2.2 implementation, approve or revise:
+These were the decisions presented for approval at the end of M2.1. The user
+approved the following MVP choices before M2.2 implementation:
 
 1. whether graph disposal is bridge-owned only or needs a minimal core API;
 2. the exact internal handle layout and whether any `u64` is exposed as
    `BigInt`, split integers, or opaque wrapper state;
-3. the supported MVP value tags, integer ranges, null/undefined policy, and
-   NaN/signed-zero equality behavior;
+3. the future value tags beyond the approved boolean, finite-`f64`, and string
+   set;
 4. structured results versus exceptions for expected and invariant errors;
 5. the typed-array layout for pending computation IDs;
 6. whether `FinalizationRegistry` is permitted for diagnostics only;
@@ -435,17 +440,62 @@ Before M2.2 implementation, approve or revise:
    copy/import protocol; and
 9. the test/runtime matrix and benchmark environment for later milestones.
 
-These decisions are intentionally not encoded in Rust or TypeScript by M2.1.
+The public TypeScript wrapper and worker-transfer policy remain future
+decisions even though the Rust bridge choices are implemented below.
 
 ## 14. M2.2 implementation boundary
 
-After architecture approval, M2.2 may add the smallest bridge necessary to
-create and own a graph, adapt the approved scalar value set, validate handles,
-map errors, expose dependency/batch/drain operations, and add real WASM and
-TypeScript integration tests. It must preserve M1 APIs and invariants and
-keep computation execution, scheduling, compiler behavior, and DOM work out
-of scope.
+M2.2 adds the smallest bridge necessary to create and own a graph, adapt the
+approved scalar value set, validate handles, map errors, expose
+dependency/batch/drain operations, and run real WASM smoke tests. It preserves
+M1 APIs and invariants and keeps computation execution, scheduling, compiler
+behavior, and DOM work out of scope.
 
 Any change to `ruseact-core` beyond an approved lifetime or adapter contract
-is a new architecture decision. No M2.2 implementation should be started
-from this proposal alone without resolving the open decisions above.
+is a new architecture decision. The implementation details and remaining
+handoff boundaries are recorded below.
+
+## 15. M2.2 approved implementation
+
+The following is verified implementation, not a future proposal.
+
+- `wasm-bindgen` `0.2.130` provides ES-module-compatible exports and
+  `js-sys` `0.3.107` provides `Uint32Array` and structured error objects.
+- `WasmCore` owns one `ReactiveGraph`; explicit `dispose()` drops it and
+  invalidates the bridge registries. Double disposal and post-disposal use
+  return `disposed_instance`.
+- `WasmHandle` is an opaque class with private instance token, graph ID,
+  resource kind, slot, and generation fields. Every operation validates these
+  fields and the corresponding live core identity. A `WasmDependencyList` is
+  likewise bound to its creating core and graph.
+- The only accepted values are boolean, finite `f64`, and UTF-8 string.
+  `NaN`, infinities, `null`, `undefined`, arrays, objects, functions, and
+  symbols return `unsupported_value`; a value of the wrong signal type returns
+  `type_mismatch`. Rust `PartialEq` remains authoritative, including equal
+  positive and negative zero.
+- Operational failures use stable error codes. Rust `Result<T, JsValue>` is
+  exposed by wasm-bindgen as a thrown plain object with `code`, `operation`,
+  and optional resource identity fields. No raw pointer, address, or Rust
+  debug string is part of the contract.
+- `drain_pending_computations()` copies FIFO `(slot, generation)` pairs into a
+  `Uint32Array`. It honors the active-batch gate and performs no computation
+  execution. The bridge registry is checked before identities are encoded;
+  an impossible mismatch is an internal invariant failure rather than a
+  silently dropped pending item.
+
+The reproducible bridge verification sequence is:
+
+```bash
+cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+wasm-bindgen target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+  --target nodejs --out-dir /tmp/ruseact-m2.2-bindgen
+RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.2-bindgen \
+  node scripts/test_wasm_bridge.mjs
+```
+
+The committed smoke test exercises actual generated Node/WASM bindings for
+scalar round trips, equality-aware writes, dependency operations, nested
+batching, FIFO pending transfer, cross-instance misuse, stale handles, and
+explicit disposal. M2.3 owns the ergonomic TypeScript wrapper and its broader
+integration matrix; M2.2 does not claim browser, worker, DOM, or application
+performance.

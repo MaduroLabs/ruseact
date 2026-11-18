@@ -38,9 +38,10 @@ API compatibility is claimed.
 | M1.3 — Dirty propagation | Complete        |
 | M1.4 — Batching            | Complete        |
 | M1.5 — Core verification and benchmark baseline | Complete |
-| M2.1 — WASM ABI design | Design proposal; implementation pending review |
+| M2.1 — WASM ABI design | Reviewed and approved |
+| M2.2 — Rust WASM exports | Implemented; pending review |
 | Scheduling and execution   | Not implemented |
-| WASM integration           | Not implemented |
+| WASM integration           | M2.2 Rust bridge implemented; TypeScript wrapper not implemented |
 | DOM renderer               | Not implemented |
 | Compiler integration       | Not implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
@@ -67,24 +68,28 @@ The Rust reactive core supports:
 - A dependency-free Rust-native benchmark baseline for core graph operations;
   these measurements are not browser, JavaScript, WASM-bridge, or rendering
   benchmarks.
+- A first `wasm-bindgen` bridge in `crates/ruseact-wasm` with explicit graph
+  disposal, opaque validated signal and computation handles, scalar signal
+  operations, dependency metadata operations, nested batching, and copied
+  pending-computation IDs. The bridge does not execute computations.
 
 Computation execution, automatic dependency tracking, and scheduling are not
-yet implemented. The M2.1 WASM ABI is documented as a design proposal only;
-no WASM exports or JavaScript runtime bridge are implemented.
+yet implemented. The M2.3 TypeScript runtime wrapper, DOM renderer, compiler,
+and worker handle transfer are also not implemented.
 
 ## Repository structure
 
 - `crates/ruseact-core` — Platform-independent Rust reactive core.
-- `crates/ruseact-wasm` — Planned WASM bridge.
+- `crates/ruseact-wasm` — Rust-to-JavaScript WASM bridge for the approved M2.2
+  scalar and reactive-identity ABI.
 - `packages/ruseact` — Future TypeScript/JSX framework interface.
 - `packages/ruseact-dom` — Future DOM integration.
 - `docs` — Architecture decisions and technical documentation.
 
-The [M2.1 WASM ABI design](docs/wasm-abi-design.md) documents the proposed
-handle, value, ownership, error, and pending-work contracts for a future
-bridge. It also defines the validation and performance plans for later M2
-milestones. The proposal requires human architecture approval before any
-WASM exports are added.
+The [M2.1 WASM ABI design](docs/wasm-abi-design.md) records the reviewed
+handle, value, ownership, error, and pending-work contract. M2.2 implements the
+approved Rust bridge portion; the public TypeScript wrapper remains a later
+M2.3 milestone.
 
 Example applications are maintained in a separate repository.
 
@@ -133,6 +138,46 @@ and the measured environment are recorded in
 They establish a reproducible Rust-native baseline only; they do not support
 claims about React, Solid, Leptos, browser rendering, JavaScript execution,
 WASM crossings, or end-to-end application performance.
+
+## M2.2 Rust WASM bridge
+
+The approved M2.2 bridge is implemented in `crates/ruseact-wasm` using
+`wasm-bindgen` `0.2.130` and `js-sys` `0.3.107`. Each `WasmCore` owns one
+RustReactiveCore graph and must be explicitly disposed. Handles are opaque
+WASM objects; the bridge validates their instance, graph, resource kind, slot,
+and generation before every operation. The bridge never exposes Rust pointers
+or executes computation bodies.
+
+The MVP accepts only booleans, finite `f64` numbers, and UTF-8 strings. Arrays,
+objects, functions, symbols, `null`, `undefined`, `NaN`, and infinities are
+rejected. Numeric equality follows Rust `f64` `PartialEq`, so `+0.0` and
+`-0.0` are equal and an equal write does not create dirty work. Expected
+operational failures are surfaced as generated JavaScript exceptions whose
+value is a structured object containing a stable `code` and `operation` (and
+resource identity fields where applicable).
+
+Dependency lists are instance-bound and replace dependencies atomically. Batch
+boundaries preserve M1.4 nested semantics. `drain_pending_computations()`
+returns a copied `Uint32Array` containing FIFO `(slot, generation)` pairs;
+the bridge does not transfer Rust references or invoke JavaScript callbacks.
+Cross-worker handle transfer, automatic disposal, computation execution,
+scheduling, and the public TypeScript wrapper remain future work.
+
+Build and run the bridge smoke test with a user-space `wasm-bindgen` CLI that
+matches the crate version:
+
+```bash
+cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+wasm-bindgen target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+  --target nodejs --out-dir /tmp/ruseact-m2.2-bindgen
+RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.2-bindgen \
+  node scripts/test_wasm_bridge.mjs
+```
+
+The generated bindings and WASM artifact are verification outputs and are not
+committed. See [docs/wasm-abi-design.md](docs/wasm-abi-design.md) for the
+boundary contract and [docs/work-progress.md](docs/work-progress.md) for the
+verified command results and current M2.3 handoff.
 
 ## Manual-approval development workflow
 

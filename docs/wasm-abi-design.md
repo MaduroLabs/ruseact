@@ -499,3 +499,49 @@ batching, FIFO pending transfer, cross-instance misuse, stale handles, and
 explicit disposal. M2.3 owns the ergonomic TypeScript wrapper and its broader
 integration matrix; M2.2 does not claim browser, worker, DOM, or application
 performance.
+
+## 16. M2.2.1 computation identity bridge
+
+M2.2.1 adds the following approved, additive export to close the M2.3 handle
+mapping gap:
+
+```text
+WasmCore.computation_identity(computation: WasmHandle)
+  -> Result<Uint32Array, JsValue>
+```
+
+For a live computation handle, the returned copied array is exactly two
+`Uint32` values: `[slot, generation]`. It uses the same identity components
+that `drain_pending_computations()` transfers. The generated wasm-bindgen
+declaration exposes the result as `Uint32Array` and does not expose Rust
+references or pointers.
+
+The method first applies the existing active-instance and computation
+validation rules. It rejects disposed instances, foreign instance or graph
+identities, signal handles, stale generations, malformed resource kinds, and
+missing live computation records using the existing structured error codes.
+Identity retrieval does not mutate the graph, computation registry, dirty flags,
+or pending queue. Repeated retrieval is therefore safe and deterministic.
+
+The pair is only meaningful inside the `WasmCore` instance that returned the
+original opaque handle. It is metadata, not a capability: callers cannot use
+arbitrary pairs to construct a `WasmHandle`. The bridge deliberately provides
+no numeric resolver, public handle constructor, or writable handle fields.
+
+### M2.3 registry handoff (planned, not implemented here)
+
+The future TypeScript runtime must:
+
+1. call `create_computation()`;
+2. call `computation_identity()` on that returned handle;
+3. store the original opaque handle in a registry owned by the same runtime
+   instance, keyed by `(slot, generation)`;
+4. validate the even-length shape of every pending-drain array;
+5. look up each FIFO pair in that registry and return the existing wrapper; and
+6. remove the entry on computation disposal and clear all entries on graph
+   disposal.
+
+It must never infer identity from allocation order or construct a handle from a
+raw pair. An unknown pending pair is an internal consistency failure and must
+not be ignored or mapped to another computation. M2.2.1 documents this
+contract only; it does not implement the TypeScript registry or public runtime.

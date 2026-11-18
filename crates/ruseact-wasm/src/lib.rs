@@ -637,6 +637,12 @@ impl WasmCore {
     }
 
     #[allow(dead_code)]
+    fn computation_identity_pair(&self, computation: &WasmHandle) -> Result<[u32; 2], BridgeError> {
+        let (_, computation) = self.validate_computation(computation, "computation_identity")?;
+        Ok([computation.index(), computation.generation()])
+    }
+
+    #[allow(dead_code)]
     fn drain_pending_pairs(&mut self) -> Result<Vec<u32>, BridgeError> {
         self.ensure_active("drain_pending_computations")?;
         let pending = self
@@ -744,6 +750,17 @@ impl WasmCore {
     pub fn dispose_computation(&mut self, computation: &WasmHandle) -> Result<(), JsValue> {
         self.dispose_computation_internal(computation)
             .map_err(BridgeError::to_js)
+    }
+
+    /// Returns the validated `(slot, generation)` identity of a live
+    /// computation handle. The pair is metadata for the owning `WasmCore`
+    /// instance; it is not an authenticated handle constructor input.
+    #[cfg(target_arch = "wasm32")]
+    pub fn computation_identity(&self, computation: &WasmHandle) -> Result<Uint32Array, JsValue> {
+        let pair = self
+            .computation_identity_pair(computation)
+            .map_err(BridgeError::to_js)?;
+        Ok(Uint32Array::from(pair.as_slice()))
     }
 
     pub fn dispose_resource(&mut self, handle: &WasmHandle) -> Result<(), JsValue> {
@@ -1008,5 +1025,70 @@ mod tests {
         );
         core.set_scalar(&first, ScalarValue::Number(1.0)).unwrap();
         assert_eq!(core.drain_pending_pairs().unwrap(), vec![0, 0]);
+    }
+
+    #[test]
+    fn computation_identity_matches_pending_pair_format_without_mutation() {
+        let mut core = WasmCore::new_internal().unwrap();
+        let signal = number_signal(&mut core, 0.0);
+        let first = core.create_computation_internal().unwrap();
+        let second = core.create_computation_internal().unwrap();
+        core.subscribe_internal(&signal, &first).unwrap();
+        core.subscribe_internal(&signal, &second).unwrap();
+
+        assert_eq!(core.computation_identity_pair(&first).unwrap(), [0, 0]);
+        assert_eq!(core.computation_identity_pair(&second).unwrap(), [1, 0]);
+        core.set_scalar(&signal, ScalarValue::Number(1.0)).unwrap();
+        assert_eq!(core.computation_identity_pair(&first).unwrap(), [0, 0]);
+        assert_eq!(core.computation_identity_pair(&second).unwrap(), [1, 0]);
+        assert_eq!(core.drain_pending_pairs().unwrap(), vec![0, 0, 1, 0]);
+    }
+
+    #[test]
+    fn computation_identity_rejects_stale_handles_after_slot_reuse() {
+        let mut core = WasmCore::new_internal().unwrap();
+        let first = core.create_computation_internal().unwrap();
+        assert_eq!(core.computation_identity_pair(&first).unwrap(), [0, 0]);
+        core.dispose_computation_internal(&first).unwrap();
+
+        assert_eq!(
+            WasmCore::error_code(core.computation_identity_pair(&first).map(|_| ())),
+            Some("stale_handle")
+        );
+        let replacement = core.create_computation_internal().unwrap();
+        assert_eq!(replacement.index, first.index);
+        assert_eq!(replacement.generation, first.generation + 1);
+        assert_eq!(
+            core.computation_identity_pair(&replacement).unwrap(),
+            [replacement.index, replacement.generation]
+        );
+    }
+
+    #[test]
+    fn computation_identity_rejects_foreign_and_wrong_resource_handles() {
+        let mut first = WasmCore::new_internal().unwrap();
+        let second = WasmCore::new_internal().unwrap();
+        let computation = first.create_computation_internal().unwrap();
+        let signal = number_signal(&mut first, 0.0);
+
+        assert_eq!(
+            WasmCore::error_code(second.computation_identity_pair(&computation).map(|_| ())),
+            Some("foreign_instance")
+        );
+        assert_eq!(
+            WasmCore::error_code(first.computation_identity_pair(&signal).map(|_| ())),
+            Some("invalid_computation")
+        );
+    }
+
+    #[test]
+    fn computation_identity_rejects_disposed_instances() {
+        let mut core = WasmCore::new_internal().unwrap();
+        let computation = core.create_computation_internal().unwrap();
+        core.dispose_internal().unwrap();
+        assert_eq!(
+            WasmCore::error_code(core.computation_identity_pair(&computation).map(|_| ())),
+            Some("disposed_instance")
+        );
     }
 }

@@ -2,10 +2,11 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m2.1-wasm-abi-design`
+- Branch: `feature/m2.2-wasm-exports`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `e4310e8a554a2cc28130bbd33862c11a19b08f2f`
-- Last verified on: Linux x86_64, 2026-11-18 for M2.1; M1.1–M1.5 were already merged into this baseline
+- Baseline: `origin/develop` at `2fa97384d048333067bf690063050bb63afcc404`
+- Last verified on: Linux x86_64, 2026-11-18 for M2.2; M1.1–M1.5 and the
+  reviewed M2.1 ABI design were already merged into this baseline
 
 ## Completed
 
@@ -38,12 +39,23 @@
 - [x] Audited the M1 RustReactiveCore APIs and the currently empty WASM and TypeScript package boundaries for M2.1.
 - [x] Added the documentation-only M2.1 WASM ABI proposal covering handles, values, ownership, errors, pending-ID transfer, validation, and performance measurement.
 - [x] Recorded M2.1 alternatives and decisions requiring human architecture approval; no runtime code or dependency was added.
+- [x] Implemented the approved M2.2 `wasm-bindgen` bridge with explicit graph
+  ownership, opaque validated handles, scalar signals, metadata computations,
+  dependency operations, nested batching, structured errors, and copied
+  pending-ID transfer.
+- [x] Added native bridge tests and a real generated Node/WASM smoke test for
+  scalar round trips, equality, isolation, lifecycle, dependencies, batching,
+  stale handles, and pending FIFO behavior.
+- [x] Updated the README and architecture documents with the implemented ABI,
+  build commands, limitations, and the M2.3 handoff.
 
 ## In progress / next
 
 - [x] Specify the Rust-to-JavaScript ABI before adding WASM exports.
-- [ ] Obtain human approval for the M2.1 open decisions before implementing M2.2.
-- [ ] Implement and test the approved WASM bridge in M2.2; do not begin from this proposal without approval.
+- [x] Obtain explicit approval for the M2.1 MVP decisions.
+- [x] Implement and test the approved WASM bridge in M2.2.
+- [ ] Build the M2.3 public TypeScript wrapper; preserve the M2.2 opaque-handle
+  and structured-error contract.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -95,6 +107,22 @@
   `python3 scripts/validate_skills.py`, `python3 scripts/test_workflow_policy.py`,
   and `python3 scripts/test_automation_gate.py`.
 
+- M2.2 validation — PASS: `cargo fmt --all -- --check`, `cargo clippy
+  --workspace --all-targets --locked -- -D warnings`, `cargo test
+  --workspace --locked` (35 core tests and 6 bridge tests; 41 total; 0 doc
+  tests), `cargo check --workspace --target wasm32-unknown-unknown --locked`,
+  `pnpm typecheck` (host Node `22.23.3`), and `git diff --check`.
+- M2.2 real bridge verification — PASS: `cargo build -p ruseact-wasm
+  --target wasm32-unknown-unknown --release --locked`, `wasm-bindgen-cli
+  0.2.130` generation for the Node target, and
+  `RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.2-bindgen node
+  scripts/test_wasm_bridge.mjs`. The smoke test invoked generated WASM and
+  passed scalar, dependency, batch, pending-transfer, isolation, stale-handle,
+  and disposal scenarios.
+- M2.2 policy validation — PASS: repository skill, workflow, automation, README,
+  and risk checks were run against the final feature diff; generated WASM
+  outputs remained outside the repository.
+
 ## Blockers / decisions
 
 - M0 intentionally has no runtime API, compiler, DOM renderer, or complex scheduler.
@@ -105,4 +133,14 @@
 - GitHub native auto-merge is disabled; the active `develop` and `main` rulesets enforce required reviews, required CI contexts, and squash merging.
 - Automatic merge and promotion workflow records are disabled in GitHub Actions and their workflow files are removed from the repository. Future promotion requires explicit user invocation and manual merging of the protected promotion PR.
 - Linux verification used the repository-pinned Rust `1.99.0` toolchain and a user-space Ubuntu linker/sysroot because the host did not provide a global `cc` linker; no global packages or repository-generated toolchain files were added.
-- M2.1 is design-only: no `wasm-bindgen` exports, JS wrappers, value adapters, or bridge dependencies exist yet. The proposed graph-disposal boundary, handle wire layout, value/equality policy, error surface, and worker-transfer policy require explicit human architecture approval before M2.2.
+- M2.1 was design-only; its graph-disposal boundary, handle layout,
+  value/equality policy, error surface, binding technology, and worker-transfer
+  policy were explicitly approved before M2.2 implementation. The public
+  TypeScript wrapper and worker transfer remain future work.
+- M2.2 is limited to the Rust/WASM adapter. It does not provide the M2.3
+  TypeScript wrapper, computation execution, scheduling, DOM/compiler
+  integration, arbitrary JavaScript object storage, or worker handle transfer.
+- The generated bindings used for verification require a matching user-space
+  `wasm-bindgen-cli 0.2.130`; the CLI was installed under `/data/tmp` and no
+  generated artifact is committed. Browser and cross-worker execution remain
+  future integration work.

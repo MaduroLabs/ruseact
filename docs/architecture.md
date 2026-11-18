@@ -233,3 +233,62 @@ tags and number semantics, graph-disposal boundary, error result policy,
 pending-ID wire layout, WASM binding technology, and worker-transfer policy
 require human approval before M2.2. M2.1 does not implement or silently
 choose any of these runtime contracts.
+
+## Decision 12: M2.2 approved Rust WASM exports
+
+M2.1 was reviewed and its MVP choices were explicitly approved before this
+bridge was implemented. The implementation is limited to the Rust adapter in
+`crates/ruseact-wasm`; `ruseact-core` remains independent of JavaScript,
+`wasm-bindgen`, the DOM, and browser APIs.
+
+### Implemented boundary
+
+`WasmCore` owns exactly one `ReactiveGraph` and stores the typed signal and
+computation records needed to validate opaque handles. `dispose` drops the
+graph and clears the bridge registries. A second disposal and every operation
+after disposal return the stable `disposed_instance` error; no finalizer is a
+correctness mechanism.
+
+Each handle carries private bridge identity fields: a per-`WasmCore` instance
+token, the graph ID, resource kind, slot index, and generation. The bridge
+validates all of them and then asks the core to validate the live generational
+identity. Signal and computation handles therefore cannot be used across core
+instances, graphs, resource kinds, or disposed/reused slots. Dependency lists
+are also bound to their creating core instance and graph, and all dependency
+handles are validated before atomic replacement.
+
+The exposed scalar set is `boolean`, finite `f64`, and UTF-8 string. `null`,
+`undefined`, arrays, objects, functions, symbols, `NaN`, and infinities are
+rejected. The bridge delegates equality to the existing core, including
+`+0.0 == -0.0`; it does not introduce a separate integer representation or
+change core `PartialEq` behavior.
+
+The bridge exposes graph disposal, scalar signal create/read/write/dispose,
+metadata-only computation create/dispose, subscribe/unsubscribe, dependency
+replacement, nested batch boundaries, and pending-work draining. It never
+executes computations or accepts JavaScript callbacks. Rust `Result` errors
+are mapped to JavaScript exceptions whose thrown value is a plain structured
+object with stable `code` and `operation` fields plus optional resource,
+index, and generation fields. Internal invariant errors remain distinct from
+expected stale, foreign, type, lifecycle, and batch failures.
+
+Pending computation transfer calls the existing core drain operation only after
+the active-batch gate has been applied. The result is copied into a
+`Uint32Array` as FIFO `(slot, generation)` pairs. No Rust reference or pointer
+crosses the boundary, and no computation body runs as part of a drain.
+
+The bridge is built as a `cdylib` and `rlib` for `wasm32-unknown-unknown` using
+`wasm-bindgen` `0.2.130` and `js-sys` `0.3.107`. The checked-in
+`scripts/test_wasm_bridge.mjs` smoke test exercises real Node/WASM calls for
+scalar round trips, equality-aware writes, dependency operations, nested
+batching, FIFO pending transfer, stale/foreign handles, and disposal.
+
+### Deliberate limits and handoff
+
+This decision does not add a public TypeScript wrapper, worker serialization,
+automatic garbage-collection disposal, computation execution, scheduling,
+DOM integration, compiler integration, or arbitrary JavaScript object storage.
+M2.3 may build ergonomic TypeScript ownership wrappers on top of this bridge;
+it must preserve the opaque-handle and structured-error contracts and add the
+broader real-runtime integration matrix. Browser and worker transfer behavior
+remain unmeasured and unsupported until those milestones are designed.

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Trusted GitHub API gate for Ruseact merge and promotion workflows.
+"""Fail-closed verifier for explicitly authorized manual promotion.
 
-This script is run only from ``pull_request_target`` or an explicitly
-authorized workflow-dispatch job after checking out a trusted repository
-revision.  It never checks out or executes pull-request head code.  A policy
-decision is written to ``GITHUB_OUTPUT`` for the caller; API or data-integrity
-errors fail the workflow instead of producing an eligible decision.
+Automatic merge and promotion workflows were intentionally removed. This
+module remains useful to a manually invoked recovery command and tests the
+same GitHub metadata, README, review, check, SHA, and ruleset invariants. It
+never checks out or executes pull-request head code and never mutates GitHub.
 """
 from __future__ import annotations
 
@@ -181,48 +180,10 @@ def verify_status_and_reviews(
         add(decision, reasons, "required pull-request approvals are not satisfied")
 
 
-def evaluate_auto_merge(api: GitHubApi, pr_number: int, decision: dict[str, object], reasons: list[str]) -> None:
-    pr = api.get(f"/repos/{api.repository}/pulls/{pr_number}")
-    files = api.paginated(f"/repos/{api.repository}/pulls/{pr_number}/files")
-    repository = api.get(f"/repos/{api.repository}")
-    rulesets = applicable_rulesets(api, "develop", str(repository.get("default_branch") or "main"))
-    paths = changed_paths(files)
-    risk, risk_reasons = classify_paths(paths)
-    decision.update(base_decision(risk, risk_reasons, str(pr.get("head", {}).get("sha") or "")))
-    decision["risk"] = risk
-    decision["reason"] = " | ".join(risk_reasons)
-
-    if pr.get("state") != "open":
-        add(decision, reasons, f"PR is not open (state={pr.get('state')})")
-    if pr.get("base", {}).get("ref") != "develop":
-        add(decision, reasons, "PR target is not develop")
-    if pr.get("draft"):
-        add(decision, reasons, "draft PRs cannot auto-merge")
-    if risk != "LOW":
-        add(decision, reasons, "high-risk changes require explicit human approval")
-    if not repository.get("allow_auto_merge"):
-        add(decision, reasons, "repository native auto-merge is disabled")
-    if not repository.get("allow_squash_merge"):
-        add(decision, reasons, "repository squash merge is disabled")
-    if pr.get("mergeable") is not True or pr.get("mergeable_state") in {
-        "dirty",
-        "conflicting",
-        "unknown",
-    }:
-        add(decision, reasons, "PR mergeability is not verified as clean")
-
-    verify_status_and_reviews(
-        api,
-        pr,
-        files,
-        rulesets,
-        str(repository.get("default_branch") or "main"),
-        decision,
-        reasons,
-    )
-    decision["reason"] = " | ".join(reasons) if reasons else "all trusted auto-merge gates passed"
-    if not reasons:
-        decision["eligible"] = "true"
+def automatic_merge_blocked(decision: dict[str, object], reasons: list[str]) -> None:
+    decision.update(base_decision("UNKNOWN", [], ""))
+    add(decision, reasons, "automatic PR merging is disabled by manual-approval policy")
+    decision["reason"] = " | ".join(reasons)
 
 
 def evaluate_promotion(
@@ -231,7 +192,15 @@ def evaluate_promotion(
     expected_merge_sha: Optional[str],
     decision: dict[str, object],
     reasons: list[str],
+    *,
+    confirmed: bool = False,
 ) -> None:
+    if not confirmed:
+        decision.update(base_decision("UNKNOWN", [], ""))
+        add(decision, reasons, "explicit completion confirmation is required")
+        decision["reason"] = " | ".join(reasons)
+        return
+
     pr = api.get(f"/repos/{api.repository}/pulls/{pr_number}")
     files = api.paginated(f"/repos/{api.repository}/pulls/{pr_number}/files")
     repository = api.get(f"/repos/{api.repository}")
@@ -283,8 +252,6 @@ def evaluate_promotion(
 
     main_rulesets = applicable_rulesets(api, "main", default_branch)
     main_summary = summarize_rulesets(main_rulesets, "main", default_branch)
-    if not repository.get("allow_auto_merge"):
-        add(decision, reasons, "repository native auto-merge is disabled for the promotion PR")
     if not repository.get("allow_squash_merge"):
         add(decision, reasons, "repository squash merge is disabled for the promotion PR")
     if not main_summary["has_pull_request_rule"]:
@@ -302,9 +269,14 @@ def evaluate_promotion(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("auto-merge", "promote"), required=True)
+    parser.add_argument("--mode", choices=("promote",), required=True)
     parser.add_argument("--pr-number", type=int, required=True)
     parser.add_argument("--expected-merge-sha")
+    parser.add_argument(
+        "--confirm-completion",
+        choices=("CONFIRM",),
+        help="required explicit user confirmation that the merged task is complete",
+    )
     parser.add_argument("--output")
     args = parser.parse_args()
 
@@ -318,10 +290,14 @@ def main() -> int:
     decision: dict[str, object] = {"eligible": "false", "reason": "", "risk": "UNKNOWN"}
     reasons: list[str] = []
     try:
-        if args.mode == "auto-merge":
-            evaluate_auto_merge(api, args.pr_number, decision, reasons)
-        else:
-            evaluate_promotion(api, args.pr_number, args.expected_merge_sha, decision, reasons)
+        evaluate_promotion(
+            api,
+            args.pr_number,
+            args.expected_merge_sha,
+            decision,
+            reasons,
+            confirmed=args.confirm_completion == "CONFIRM",
+        )
     except GateError as error:
         print(f"automation gate failed closed: {error}", file=sys.stderr)
         return 1

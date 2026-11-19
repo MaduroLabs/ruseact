@@ -29,7 +29,11 @@ for (const filePath of paths) {
     check(row.samples_ns.every((value) => Number.isFinite(value) && value >= 0), `${filePath} row ${index}: sample values`);
     check(Number.isFinite(row.median_ns) && Number.isFinite(row.p95_ns), `${filePath} row ${index}: summary values`);
     check(row.p95_ns === nearestRank(row.samples_ns, 0.95), `${filePath} row ${index}: p95 calculation`);
-    check(Number.isFinite(row.median_operations_per_second) && row.median_operations_per_second > 0, `${filePath} row ${index}: throughput`);
+    if (row.median_ns === 0) {
+      check(row.median_operations_per_second === null, `${filePath} row ${index}: zero-timer throughput`);
+    } else {
+      check(Number.isFinite(row.median_operations_per_second) && row.median_operations_per_second > 0, `${filePath} row ${index}: throughput`);
+    }
   }
   console.log(`${filePath}: valid (${report.results.length} rows, ${report.metadata?.source_sha ?? "unknown source"})`);
 }

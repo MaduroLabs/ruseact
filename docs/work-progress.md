@@ -85,6 +85,11 @@
   virtual-time/DOM-dump completion, added real-time DevTools Protocol polling,
   browser timer-resolution metadata, calibrated short workloads, and fail-closed
   result-integrity checks for unresolved rows.
+- [x] Added bounded adaptive per-workload calibration: prepared independent
+  states are measured before official trials, expanded only up to eight states
+  toward the timer-resolution target, with eight prepared states and a 50 ms
+  calibration-sample bound; diagnostic artifacts upload even when
+  the integrity gate fails.
 
 ## In progress / next
 
@@ -196,8 +201,10 @@
   generated `wasm-bindgen --target web` bindings, loaded the actual WASM
   module through `createReactiveCore(loadWasm)`, and passed 94 assertions.
 - M2.5 local Node benchmark diagnostic — PASS on InstaBox with Node `22.23.3`:
-  263 structured result rows across direct WASM and TypeScript layers after the
-  timing repair; the integrity and result-format validators passed. The
+  263/263 structured result rows across direct WASM and TypeScript layers after
+  adaptive calibration; zero unresolved, zero-median, zero-sample,
+  non-finite, and calibration-limit rows; the integrity and result-format
+  validators passed. The
   authoritative pinned Node 24 and hosted Chromium results are recorded after
   the corrected pull-request benchmark workflow completes.
 
@@ -242,7 +249,8 @@
   required-check rulesets; repository administrators must add it if browser
   verification is intended to gate merges.
 - M2.5 benchmark timing has no performance pass/fail threshold, but its
-  integrity gate rejects missing, non-finite, all-zero, or zero-median rows.
+  integrity gate rejects missing, non-finite, zero-sample, all-zero,
+  zero-median, or calibration-limit rows.
   Browser completion uses real-time DevTools Protocol polling rather than
   Chromium virtual time or `--dump-dom`. The hosted benchmark workflow uploads
   results as artifacts; local Node diagnostics use host Node `22.23.3` when the

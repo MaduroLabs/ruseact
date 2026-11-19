@@ -179,7 +179,9 @@ work that direct calls do not. Browser runs use real Chromium with a DevTools
 Protocol completion signal and real `performance.now()`; virtual-time and
 `--dump-dom` completion are not used for performance measurements. Zero-median
 or non-finite rows fail the benchmark integrity gate rather than being treated
-as zero-cost operations.
+as zero-cost operations. Short workloads first calibrate from their existing
+operation counts against the measured browser timer resolution, using bounded
+independent prepared states and recording the resulting operation count.
 
 Run the manually reproducible Node benchmark after building matching bindings:
 

@@ -135,6 +135,7 @@ function browserPage(sourceSha, browserVersion) {
     const directModule = await import("./generated/ruseact_wasm.js");
     await initializeWasm();
     const runtimeModule = await import("./runtime/index.js");
+    const timerResolutionNs = estimateTimerResolutionNs();
     const precomputed = [
       summarizeSamples({
         layer: "direct-wasm",
@@ -159,15 +160,15 @@ function browserPage(sourceSha, browserVersion) {
       directModule,
       runtimeModule,
       wasmModule: directModule,
-      clock: { now: () => performance.now(), toNs: (value) => value * 1000000 },
+      clock: { now: () => performance.now(), toNs: (value) => value * 1000000, resolutionNs: timerResolutionNs },
       metadata: {
         source_sha: sourceSha,
         browser: browserVersion,
         user_agent: navigator.userAgent,
         host: navigator.platform,
         timer: "performance.now() converted to nanoseconds",
-        timer_resolution_ns: estimateTimerResolutionNs(),
-        timer_resolution_note: "performance.now() is monotonic, but browser timer resolution is environment-controlled; unresolved zero-median rows fail validation",
+        timer_resolution_ns: timerResolutionNs,
+        timer_resolution_note: "performance.now() is monotonic, but browser timer resolution is environment-controlled; bounded adaptive calibration targets a measurable interval and unresolved zero samples fail validation",
         layer: "real Chromium web-module WASM plus compiled packages/ruseact runtime",
         wasm_build: "wasm32-unknown-unknown release with wasm-bindgen --target web",
         completion: "Chromium DevTools Protocol Runtime.evaluate with a real-time parent timeout",
@@ -416,12 +417,14 @@ function renderSummary(report) {
     `Source SHA: \`${report.metadata.source_sha}\``,
     `Browser: ${report.metadata.browser}`,
     `Trials: ${report.configuration.trials}; warmups: ${report.configuration.warmups}`,
+    `Integrity: ${report.integrity.status}; valid rows: ${report.integrity.valid_rows}; unresolved rows: ${report.integrity.unresolved_rows}; zero-sample rows: ${report.integrity.zero_sample_rows}`,
+    `Timer resolution estimate: ${report.metadata.timer_resolution_ns ?? "unavailable"} ns`,
     "",
-    "| Layer | Operation | Size | Kind | Median ns | p95 ns | ns/op | ops/s |",
-    "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |",
+    "| Layer | Operation | Size | Kind | Batches | Timed ops | Median ns | p95 ns | ns/op | ops/s |",
+    "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const row of report.results) {
-    lines.push(`| ${row.layer} | ${row.operation} | ${row.size ?? "-"} | ${row.value_kind ?? "-"} | ${row.median_ns.toFixed(2)} | ${row.p95_ns.toFixed(2)} | ${row.median_ns_per_operation === null ? "-" : row.median_ns_per_operation.toFixed(3)} | ${row.median_operations_per_second === null ? "-" : row.median_operations_per_second.toFixed(2)} |`);
+    lines.push(`| ${row.layer} | ${row.operation} | ${row.size ?? "-"} | ${row.value_kind ?? "-"} | ${row.calibration_batches} | ${row.timed_operations} | ${row.median_ns.toFixed(2)} | ${row.p95_ns.toFixed(2)} | ${row.median_ns_per_operation === null ? "-" : row.median_ns_per_operation.toFixed(3)} | ${row.median_operations_per_second === null ? "-" : row.median_operations_per_second.toFixed(2)} |`);
   }
   lines.push("", "Raw samples and fixture metadata are in the JSON result.", "");
   return `${lines.join("\n")}\n`;

@@ -7,6 +7,10 @@ const DEPENDENCY_COUNT = 8;
 const SHORT_OPERATION_REPETITIONS = 64;
 const TRANSFER_REPETITIONS = 64;
 const WARM_INSTANCE_REPETITIONS = 256;
+const CALIBRATION_MIN_DURATION_NS = 100_000;
+const CALIBRATION_RESOLUTION_MULTIPLIER = 8;
+const CALIBRATION_MAX_BATCHES = 8;
+const CALIBRATION_MAX_SAMPLE_NS = 50_000_000;
 
 export const BENCHMARK_CONFIG = Object.freeze({
   schema_version: 1,
@@ -19,7 +23,11 @@ export const BENCHMARK_CONFIG = Object.freeze({
   short_operation_repetitions: SHORT_OPERATION_REPETITIONS,
   transfer_repetitions: TRANSFER_REPETITIONS,
   warm_instance_repetitions: WARM_INSTANCE_REPETITIONS,
-  timer_resolution_policy: "zero-median rows are unresolved and fail result validation",
+  calibration_min_duration_ns: CALIBRATION_MIN_DURATION_NS,
+  calibration_resolution_multiplier: CALIBRATION_RESOLUTION_MULTIPLIER,
+  calibration_max_batches: CALIBRATION_MAX_BATCHES,
+  calibration_max_sample_ns: CALIBRATION_MAX_SAMPLE_NS,
+  timer_resolution_policy: "zero-median, non-finite, or calibration-limit rows are unresolved and fail validation",
   p95_method: "nearest-rank sample quantile",
 });
 
@@ -104,49 +112,127 @@ export function summarizeSamples(descriptor, samplesNs) {
     p95_ns: p95Ns,
     median_ns_per_operation: operations > 0 ? medianNs / operations : null,
     median_operations_per_second: operations > 0 ? (operations * 1_000_000_000) / medianNs : null,
+    base_timed_operations: descriptor.base_timed_operations ?? operations,
+    calibration_batches: descriptor.calibration_batches ?? 1,
+    calibration_target_ns: descriptor.calibration_target_ns ?? null,
+    calibration_samples_ns: descriptor.calibration_samples_ns ?? [],
+    calibration_limit_reached: descriptor.calibration_limit_reached ?? false,
+    unresolved_reason: descriptor.unresolved_reason ?? null,
   };
 }
 
 function measurementIntegrity(results) {
   const zeroMedianRows = results.filter((row) => row.median_ns === 0);
+  const zeroSampleRows = results.filter((row) => row.samples_ns.some((sample) => sample === 0));
   const nonFiniteRows = results.filter((row) =>
     !Number.isFinite(row.median_ns) || !Number.isFinite(row.p95_ns) ||
     row.samples_ns.some((sample) => !Number.isFinite(sample) || sample < 0));
+  const unresolvedRows = results.filter((row) => row.unresolved_reason !== null);
+  const unresolvedSet = new Set([...zeroMedianRows, ...zeroSampleRows, ...unresolvedRows]);
+  const invalidSet = new Set([...zeroMedianRows, ...zeroSampleRows, ...nonFiniteRows, ...unresolvedRows]);
   return {
     total_rows: results.length,
-    valid_rows: results.length - zeroMedianRows.length - nonFiniteRows.length,
-    unresolved_rows: zeroMedianRows.length,
+    valid_rows: results.length - invalidSet.size,
+    unresolved_rows: unresolvedSet.size,
     zero_median_rows: zeroMedianRows.length,
+    zero_sample_rows: zeroSampleRows.length,
     non_finite_rows: nonFiniteRows.length,
-    status: zeroMedianRows.length === 0 && nonFiniteRows.length === 0 ? "pass" : "unresolved",
+    calibration_limit_rows: unresolvedRows.length,
+    status: invalidSet.size === 0 ? "pass" : "unresolved",
+  };
+}
+
+async function executeBatch(clock, setup, operation, cleanup, validate, batchCount) {
+  const states = [];
+  try {
+    for (let index = 0; index < batchCount; index += 1) states.push(await setup());
+  } catch (error) {
+    for (const state of states.reverse()) await cleanup(state);
+    throw error;
+  }
+
+  const observed = [];
+  let operationError;
+  const started = clock.now();
+  try {
+    for (const state of states) observed.push(await operation(state));
+  } catch (error) {
+    operationError = error;
+  }
+  const elapsedNs = clock.toNs(clock.now() - started);
+
+  let validationError;
+  if (operationError === undefined) {
+    try {
+      for (let index = 0; index < states.length; index += 1) await validate(observed[index], states[index]);
+    } catch (error) {
+      validationError = error;
+    }
+  }
+
+  let cleanupError;
+  for (const state of states.reverse()) {
+    try {
+      await cleanup(state);
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  if (operationError !== undefined) throw operationError;
+  if (validationError !== undefined) throw validationError;
+  if (cleanupError !== undefined) throw cleanupError;
+  return elapsedNs;
+}
+
+function calibrationTargetNs(clock) {
+  const resolutionNs = clock.resolutionNs ?? CALIBRATION_MIN_DURATION_NS;
+  return Math.max(CALIBRATION_MIN_DURATION_NS, resolutionNs * CALIBRATION_RESOLUTION_MULTIPLIER);
+}
+
+async function calibrateCase(clock, setup, operation, cleanup, validate) {
+  const targetNs = calibrationTargetNs(clock);
+  const samplesNs = [];
+  let batchCount = 1;
+  let elapsedNs = 0;
+  while (true) {
+    elapsedNs = await executeBatch(clock, setup, operation, cleanup, validate, batchCount);
+    samplesNs.push(elapsedNs);
+    if (elapsedNs >= targetNs || elapsedNs >= CALIBRATION_MAX_SAMPLE_NS || batchCount >= CALIBRATION_MAX_BATCHES) break;
+    const resolutionNs = Math.max(1, clock.resolutionNs ?? CALIBRATION_MIN_DURATION_NS);
+    const denominator = Math.max(elapsedNs, resolutionNs);
+    const suggested = Math.ceil(targetNs / denominator);
+    batchCount = Math.min(CALIBRATION_MAX_BATCHES, Math.max(batchCount + 1, batchCount * Math.min(4, suggested)));
+  }
+  return {
+    batchCount,
+    targetNs,
+    samplesNs,
+    limitReached: elapsedNs < targetNs,
   };
 }
 
 async function measureCase(clock, descriptor, setup, operation, cleanup, validate) {
+  const calibration = await calibrateCase(clock, setup, operation, cleanup, validate);
+  const timedDescriptor = {
+    ...descriptor,
+    base_timed_operations: descriptor.timed_operations,
+    timed_operations: descriptor.timed_operations * calibration.batchCount,
+    calibration_batches: calibration.batchCount,
+    calibration_target_ns: calibration.targetNs,
+    calibration_samples_ns: calibration.samplesNs,
+    calibration_limit_reached: calibration.limitReached,
+    unresolved_reason: calibration.limitReached ? "calibration_limit_reached_below_target" : null,
+  };
+
   for (let trial = 0; trial < WARMUPS; trial += 1) {
-    const state = await setup();
-    try {
-      await operation(state);
-    } finally {
-      await cleanup(state);
-    }
+    await executeBatch(clock, setup, operation, cleanup, validate, calibration.batchCount);
   }
 
   const samplesNs = [];
   for (let trial = 0; trial < TRIALS; trial += 1) {
-    const state = await setup();
-    let observed;
-    const started = clock.now();
-    try {
-      observed = await operation(state);
-    } finally {
-      const elapsed = clock.now() - started;
-      samplesNs.push(clock.toNs(elapsed));
-      await validate(observed, state);
-      await cleanup(state);
-    }
+    samplesNs.push(await executeBatch(clock, setup, operation, cleanup, validate, calibration.batchCount));
   }
-  return summarizeSamples(descriptor, samplesNs);
+  return summarizeSamples(timedDescriptor, samplesNs);
 }
 
 function directLayer(moduleValue) {

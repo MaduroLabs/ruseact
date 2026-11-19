@@ -43,8 +43,8 @@ for (const filePath of paths) {
   const report = JSON.parse(readFileSync(filePath, "utf8"));
   if (report.integrity !== undefined && report.integrity.status !== "pass") {
     const unresolved = report.results
-      .filter((row) => row.median_ns === 0 || row.samples_ns.some((value) => value === 0))
-      .map((row) => `${row.layer}/${row.operation}/${row.size ?? "cold"}`);
+      .filter((row) => row.unresolved_reason !== null || row.median_ns === 0 || row.samples_ns.some((value) => value === 0))
+      .map((row) => ({ workload: `${row.layer}/${row.operation}/${row.size ?? "cold"}`, reason: row.unresolved_reason, samples_ns: row.samples_ns }));
     console.error(`${filePath}: measurement integrity diagnostics: ${JSON.stringify({ ...report.integrity, unresolved })}`);
   }
   check(report.schema_version === 1, `${filePath}: schema version`);
@@ -55,6 +55,7 @@ for (const filePath of paths) {
   check(report.integrity?.status === "pass", `${filePath}: unresolved or invalid measurements`);
   check(report.integrity?.unresolved_rows === 0, `${filePath}: unresolved rows`);
   check(report.integrity?.zero_median_rows === 0, `${filePath}: zero-median rows`);
+  check(report.integrity?.zero_sample_rows === 0, `${filePath}: zero-sample rows`);
   check(report.integrity?.non_finite_rows === 0, `${filePath}: non-finite rows`);
   const layers = new Set(report.results.map((row) => row.layer));
   check(layers.has("direct-wasm") && layers.has("typescript-runtime"), `${filePath}: measurement layers`);
@@ -67,6 +68,14 @@ for (const filePath of paths) {
     check(Array.isArray(row.samples_ns) && row.samples_ns.length === row.trials, `${filePath} row ${index}: raw samples`);
     check(row.samples_ns.every((value) => Number.isFinite(value) && value >= 0), `${filePath} row ${index}: sample values`);
     check(row.samples_ns.some((value) => value > 0), `${filePath} row ${index}: all-zero samples`);
+    check(Number.isInteger(row.base_timed_operations) && row.base_timed_operations > 0, `${filePath} row ${index}: base timed operations`);
+    check(Number.isInteger(row.calibration_batches) && row.calibration_batches > 0, `${filePath} row ${index}: calibration batches`);
+    check(row.timed_operations === row.base_timed_operations * row.calibration_batches, `${filePath} row ${index}: calibrated operation count`);
+    if (row.size !== null) {
+      check(Number.isFinite(row.calibration_target_ns) && row.calibration_target_ns > 0, `${filePath} row ${index}: calibration target`);
+      check(Array.isArray(row.calibration_samples_ns) && row.calibration_samples_ns.length > 0, `${filePath} row ${index}: calibration samples`);
+      check(row.calibration_samples_ns.every((value) => Number.isFinite(value) && value >= 0), `${filePath} row ${index}: calibration sample values`);
+    }
     check(Number.isFinite(row.median_ns) && Number.isFinite(row.p95_ns), `${filePath} row ${index}: summary values`);
     check(row.p95_ns === nearestRank(row.samples_ns, 0.95), `${filePath} row ${index}: p95 calculation`);
     check(Number.isFinite(row.median_operations_per_second) && row.median_operations_per_second > 0, `${filePath} row ${index}: throughput`);

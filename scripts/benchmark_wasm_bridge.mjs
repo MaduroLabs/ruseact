@@ -76,6 +76,17 @@ function awaitImport(url, trial) {
   return import(`${url}?m2_5_cold_trial=${trial}`);
 }
 
+function estimateTimerResolutionNs() {
+  let previous = process.hrtime.bigint();
+  let minimum = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < 10000; index += 1) {
+    const current = process.hrtime.bigint();
+    if (current > previous) minimum = Math.min(minimum, Number(current - previous));
+    previous = current;
+  }
+  return Number.isFinite(minimum) ? minimum : 1;
+}
+
 function renderSummary(report) {
   const lines = [
     "# M2.5 WASM bridge Node benchmark summary",
@@ -83,12 +94,14 @@ function renderSummary(report) {
     `Source SHA: \`${report.metadata.source_sha}\``,
     `Node: ${report.metadata.node_version}`,
     `Trials: ${report.configuration.trials}; warmups: ${report.configuration.warmups}`,
+    `Integrity: ${report.integrity.status}; valid rows: ${report.integrity.valid_rows}; unresolved rows: ${report.integrity.unresolved_rows}; zero-sample rows: ${report.integrity.zero_sample_rows}`,
+    `Timer resolution estimate: ${report.metadata.timer_resolution_ns ?? "unavailable"} ns`,
     "",
-    "| Layer | Operation | Size | Kind | Median ns | p95 ns | ns/op | ops/s |",
-    "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |",
+    "| Layer | Operation | Size | Kind | Batches | Timed ops | Median ns | p95 ns | ns/op | ops/s |",
+    "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const row of report.results) {
-    lines.push(`| ${row.layer} | ${row.operation} | ${row.size ?? "-"} | ${row.value_kind ?? "-"} | ${row.median_ns.toFixed(2)} | ${row.p95_ns.toFixed(2)} | ${row.median_ns_per_operation === null ? "-" : row.median_ns_per_operation.toFixed(3)} | ${row.median_operations_per_second === null ? "-" : row.median_operations_per_second.toFixed(2)} |`);
+    lines.push(`| ${row.layer} | ${row.operation} | ${row.size ?? "-"} | ${row.value_kind ?? "-"} | ${row.calibration_batches} | ${row.timed_operations} | ${row.median_ns.toFixed(2)} | ${row.p95_ns.toFixed(2)} | ${row.median_ns_per_operation === null ? "-" : row.median_ns_per_operation.toFixed(3)} | ${row.median_operations_per_second === null ? "-" : row.median_operations_per_second.toFixed(2)} |`);
   }
   lines.push("", "Raw samples and fixture metadata are in the JSON result.", "");
   return `${lines.join("\n")}\n`;
@@ -100,9 +113,11 @@ try {
   const workloads = await import(pathToFileURL(path.join(repositoryRoot, "scripts/benchmark_workloads.mjs")).href);
   const directModule = await import(pathToFileURL(modulePath).href);
   const runtimeModule = await import(pathToFileURL(path.join(runtimeOutput, "index.js")).href);
+  const timerResolutionNs = estimateTimerResolutionNs();
   const clock = {
     now: () => process.hrtime.bigint(),
     toNs: (value) => Number(value),
+    resolutionNs: timerResolutionNs,
   };
 
   const coldCount = workloads.BENCHMARK_CONFIG.warmups + workloads.BENCHMARK_CONFIG.trials;
@@ -141,6 +156,7 @@ try {
       rust_version: process.env.RUSEACT_RUST_VERSION ?? "1.99.0 (repository pin)",
       wasm_bindgen_version: process.env.RUSEACT_WASM_BINDGEN_VERSION ?? "0.2.130 (repository pin)",
       timer: "process.hrtime.bigint()",
+      timer_resolution_ns: timerResolutionNs,
       layer: "Node.js generated wasm-bindgen Node/WASM plus compiled packages/ruseact runtime",
       wasm_build: "wasm32-unknown-unknown release",
     },

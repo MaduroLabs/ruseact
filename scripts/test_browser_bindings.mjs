@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createReadStream, cpSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createReadStream, cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -504,9 +504,7 @@ function browserPage() {
 
 const browser = findBrowser();
 const temporaryRoot = mkdtempSync(path.join(tmpdir(), "ruseact-m3.3-browser-"));
-const compiledRoot = path.join(temporaryRoot, "compiled");
 const generatedRoot = path.join(temporaryRoot, "generated");
-mkdirSync(compiledRoot, { recursive: true });
 cpSync(bindingDirectory, generatedRoot, { recursive: true });
 let server;
 const requests = [];
@@ -533,7 +531,7 @@ try {
       "--rootDir",
       "packages",
       "--outDir",
-      compiledRoot,
+      temporaryRoot,
       "packages/ruseact/src/index.ts",
       "packages/ruseact-dom/src/host.ts",
       "packages/ruseact-dom/src/bindings.ts",

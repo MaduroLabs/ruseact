@@ -490,7 +490,7 @@ function browserPage() {
         value(runtime.dispose(), "borrowed runtime final disposal");
         host.dispose();
 
-        report({ ok: true, checks });
+        window.__ruseactPublish({ ok: true, checks });
       } catch (error) {
         window.__ruseactPublish({
           ok: false,

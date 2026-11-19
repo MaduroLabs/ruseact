@@ -6,6 +6,7 @@ const READ_REPETITIONS = 128;
 const DEPENDENCY_COUNT = 8;
 const SHORT_OPERATION_REPETITIONS = 64;
 const TRANSFER_REPETITIONS = 64;
+const WARM_INSTANCE_REPETITIONS = 256;
 
 export const BENCHMARK_CONFIG = Object.freeze({
   schema_version: 1,
@@ -17,6 +18,7 @@ export const BENCHMARK_CONFIG = Object.freeze({
   dependency_count: DEPENDENCY_COUNT,
   short_operation_repetitions: SHORT_OPERATION_REPETITIONS,
   transfer_repetitions: TRANSFER_REPETITIONS,
+  warm_instance_repetitions: WARM_INSTANCE_REPETITIONS,
   timer_resolution_policy: "zero-median rows are unresolved and fail result validation",
   p95_method: "nearest-rank sample quantile",
 });
@@ -881,7 +883,7 @@ async function addBatchCases(results, clock, layerName, directModule, runtimeMod
 }
 
 async function addLifecycleCases(results, clock, layerName, directModule, runtimeModule, wasmModule) {
-  const createCount = 32;
+  const createCount = WARM_INSTANCE_REPETITIONS;
   for (const size of SIZES) {
     const computationCount = Math.max(1, Math.floor(size / 4));
     const base = { layer: layerName, size, graph_size: size };

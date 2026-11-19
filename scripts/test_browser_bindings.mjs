@@ -101,15 +101,15 @@ function browserPage() {
       };
       window.addEventListener("error", (event) => publishFailure(event.error?.message ?? event.message));
       window.addEventListener("unhandledrejection", (event) => publishFailure(String(event.reason)));
-      window.setTimeout(() => publishFailure("reactive DOM binding watchdog expired"), 15000);
+      window.__ruseactStage = "page-ready";
+      window.setTimeout(
+        () => publishFailure("reactive DOM binding watchdog expired at " + window.__ruseactStage),
+        15000,
+      );
     </script>
     <script type="module">
-      import initializeWasm, * as wasm from "./generated/ruseact_wasm.js";
-      import { createReactiveCore } from "./ruseact/src/index.js";
-      import { createBindingContext, DomBindingError } from "./ruseact-dom/src/bindings.js";
-      import { createHostContext } from "./ruseact-dom/src/host.js";
-
       const checks = [];
+      let bindingErrorClass;
       function check(condition, name) {
         if (!condition) throw new Error("check failed: " + name);
         checks.push(name);
@@ -129,7 +129,7 @@ function browserPage() {
         try {
           callback();
         } catch (error) {
-          check(error instanceof DomBindingError, name + ": error type");
+          check(error instanceof bindingErrorClass, name + ": error type");
           check(error.code === code, name + ": " + code);
           return;
         }
@@ -137,7 +137,20 @@ function browserPage() {
       }
 
       try {
+        window.__ruseactStage = "importing-modules";
+        const [{ default: initializeWasm, ...wasm }, runtimeModule, bindingsModule, hostModule] = await Promise.all([
+          import("./generated/ruseact_wasm.js"),
+          import("./ruseact/src/index.js"),
+          import("./ruseact-dom/src/bindings.js"),
+          import("./ruseact-dom/src/host.js"),
+        ]);
+        window.__ruseactStage = "modules-imported";
+        const { createReactiveCore } = runtimeModule;
+        const { createBindingContext } = bindingsModule;
+        bindingErrorClass = bindingsModule.DomBindingError;
+        const { createHostContext } = hostModule;
         await initializeWasm();
+        window.__ruseactStage = "wasm-initialized";
         const runtime = value(await createReactiveCore(() => wasm), "real WASM runtime initializes");
         const host = createHostContext(document);
         const bindings = createBindingContext(host, runtime);

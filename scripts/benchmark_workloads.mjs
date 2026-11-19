@@ -146,6 +146,9 @@ function directLayer(moduleValue) {
       core.dispose_signal(signal);
       signal.free();
     },
+    staleSignal(signal) {
+      core.dispose_signal(signal);
+    },
     computation() {
       return core.create_computation();
     },
@@ -206,6 +209,9 @@ async function runtimeLayer(runtimeModule, wasmModule) {
       return unwrap(core.set(signal, value), "set") === "changed";
     },
     disposeSignal(signal) {
+      unwrap(core.disposeSignal(signal), "disposeSignal");
+    },
+    staleSignal(signal) {
       unwrap(core.disposeSignal(signal), "disposeSignal");
     },
     computation() {
@@ -383,6 +389,41 @@ async function addSignalCases(results, clock, layerName, directModule, runtimeMo
           check(mix(state.layer.read(state.created[size - 1])) === mix(valueFor(kind, size - 1)), "created signal value");
         },
       ));
+
+      if (kind === "number") {
+        results.push(await measureCase(
+          clock,
+          { ...base, operation: "stale_handle_validation", setup_operations: 2, timed_operations: REPEATED_OPERATIONS, cleanup: "release stale handle and graph" },
+          async () => {
+            const layer = await createLayer(layerName, directModule, runtimeModule, wasmModule);
+            const signal = layer.signal(0);
+            layer.staleSignal(signal);
+            return { layer, signal, graphLive: true };
+          },
+          (state) => {
+            let rejected = 0;
+            for (let iteration = 0; iteration < REPEATED_OPERATIONS; iteration += 1) {
+              if (state.layer.direct) {
+                try {
+                  state.layer.read(state.signal);
+                } catch (error) {
+                  if (error?.code === "stale_handle") rejected += 1;
+                }
+              } else {
+                const result = state.layer.core.get(state.signal);
+                if (result.ok === false && result.error.code === "stale_handle") rejected += 1;
+              }
+            }
+            return rejected;
+          },
+          async (state) => {
+            if (state.layer.direct) state.signal.free();
+            state.layer.disposeGraph();
+            state.layer.release();
+          },
+          async (observed) => check(observed === REPEATED_OPERATIONS, "stale handle rejection count"),
+        ));
+      }
 
       results.push(await measureCase(
         clock,

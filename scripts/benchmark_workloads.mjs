@@ -639,12 +639,14 @@ async function addDependencyCases(results, clock, layerName, directModule, runti
 
     for (const operation of ["computation_disposal", "dependency_cleanup_signal_disposal"]) {
       const disposalComputationCount = operation === "computation_disposal" ? computationCount * SHORT_OPERATION_REPETITIONS : computationCount;
+      const disposalSignalCount = operation === "dependency_cleanup_signal_disposal" ? size * SHORT_OPERATION_REPETITIONS : size;
+      const disposalEdgeCount = operation === "computation_disposal" ? disposalComputationCount * 4 : size;
       results.push(await measureCase(
         clock,
-        { ...base, operation, dependency_edges: operation === "computation_disposal" ? disposalComputationCount * 4 : size, computation_count: disposalComputationCount, affected_computations: disposalComputationCount, timed_operations: operation === "computation_disposal" ? disposalComputationCount : size, cleanup: "dispose remaining resources and graph" },
+        { ...base, operation, setup_operations: disposalSignalCount + disposalComputationCount + disposalEdgeCount, dependency_edges: disposalEdgeCount, computation_count: disposalComputationCount, affected_computations: disposalComputationCount, timed_operations: operation === "computation_disposal" ? disposalComputationCount : disposalSignalCount, cleanup: "dispose remaining resources and graph" },
         async () => {
           const layer = await createLayer(layerName, directModule, runtimeModule, wasmModule);
-          return await buildGraph(layer, size, { computationCount: disposalComputationCount, degree: 4, connect: true });
+          return await buildGraph(layer, size, { signalCount: disposalSignalCount, computationCount: disposalComputationCount, degree: 4, connect: true });
         },
         (state) => {
           if (operation === "computation_disposal") {
@@ -661,7 +663,7 @@ async function addDependencyCases(results, clock, layerName, directModule, runti
           return state.signals.length;
         },
         disposeState,
-        async (observed) => check(observed === (operation === "computation_disposal" ? disposalComputationCount : size), `${operation} count`),
+        async (observed) => check(observed === (operation === "computation_disposal" ? disposalComputationCount : disposalSignalCount), `${operation} count`),
       ));
     }
   }

@@ -437,10 +437,11 @@ function browserPage() {
           },
           key: "detached",
         }), "detached binding registration");
+        const detachedValue = detachedNode.nodeValue;
         root.removeChild(detachedNode);
         value(runtime.set(detachedSignal, 1), "detached signal write");
         expectError(bindings.flush(), "detached_node", "detached target fails closed");
-        check(detachedNode.nodeValue === "", "detached target is not mutated");
+        check(detachedNode.nodeValue === detachedValue, "detached target is not mutated");
 
         const foreignRuntime = value(await createReactiveCore(() => wasm), "foreign runtime initializes");
         const foreignSignal = value(foreignRuntime.createSignal(0), "foreign signal creation");

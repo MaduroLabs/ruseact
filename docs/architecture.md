@@ -424,3 +424,26 @@ when the hosted Chromium job executes them.
 M2.4 does not claim compatibility with every browser, bundler, worker, or
 packaging mode. The tested web-module path is the handoff for M2.5 performance
 measurement; no rendering or browser performance conclusion is made.
+
+## Decision 19: M2.5 measures the existing bridge without changing it
+
+M2.5 adds test-only benchmark scripts and a manually dispatched hosted
+workflow. The workload module runs the same deterministic fixtures through
+generated direct WASM bindings and the public TypeScript runtime, then reuses
+those workloads in real Chromium. The Rust-native M1.5 benchmark remains
+unchanged and is reported separately.
+
+The benchmark records signal conversion, dependency metadata, dirty queue
+propagation, pending `(slot, generation)` transfer, explicit nested batching,
+initialization, and lifecycle behavior for 16-, 64-, and 256-signal graphs.
+Fixture construction is outside timed sections where possible; correctness
+checks verify values, FIFO ordering, deduplication, generations, and cleanup.
+No computation executes, no scheduler is added, and no production export,
+algorithm, ABI, or public API is introduced for measurement.
+
+The direct and TypeScript rows are intentionally not collapsed into one
+"crossing cost." Public calls include wrapper validation, `CoreResult`
+normalization, opaque-handle ownership checks, and pending registry lookup.
+Only equivalent workloads may be compared, and combined overhead is labeled as
+such. Pending transfer continues to use the existing destructive drain; M2.5
+does not add acknowledgement, rollback, or a bulk update protocol.

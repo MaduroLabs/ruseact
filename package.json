@@ -10,7 +10,10 @@
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test:runtime": "node scripts/test_typescript_runtime.mjs",
-    "test:browser": "node scripts/test_browser_runtime.mjs"
+    "test:browser": "node scripts/test_browser_runtime.mjs",
+    "benchmark:node": "node scripts/benchmark_wasm_bridge.mjs",
+    "benchmark:browser": "node scripts/benchmark_browser_runtime.mjs",
+    "benchmark:validate": "node scripts/validate_benchmark_results.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"

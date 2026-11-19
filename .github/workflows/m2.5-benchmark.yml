@@ -1,0 +1,76 @@
+name: Ruseact M2.5 benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: M2.5 benchmark (Node and Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install WASM target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install matching wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - name: Build release WASM
+        run: cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+      - name: Generate Node and browser WASM bindings
+        run: |
+          mkdir -p target/m2.5-node-bindgen target/m2.5-browser-bindgen
+          wasm-bindgen \
+            target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+            --target nodejs \
+            --out-dir target/m2.5-node-bindgen
+          wasm-bindgen \
+            target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+            --target web \
+            --out-dir target/m2.5-browser-bindgen
+      - name: Run Node/WASM benchmark
+        env:
+          RUSEACT_WASM_BINDGEN_OUT: ${{ github.workspace }}/target/m2.5-node-bindgen
+          RUSEACT_BENCHMARK_OUT: ${{ github.workspace }}/target/m2.5-results/node-results.json
+          RUSEACT_BENCHMARK_SUMMARY_OUT: ${{ github.workspace }}/target/m2.5-results/node-summary.md
+          RUSEACT_BENCHMARK_SOURCE_SHA: ${{ github.sha }}
+          RUSEACT_RUST_VERSION: 1.99.0
+          RUSEACT_WASM_BINDGEN_VERSION: 0.2.130
+        run: |
+          mkdir -p target/m2.5-results
+          corepack pnpm benchmark:node
+      - name: Run real Chromium benchmark
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.5-browser-bindgen
+          RUSEACT_BENCHMARK_OUT: ${{ github.workspace }}/target/m2.5-results/browser-results.json
+          RUSEACT_BENCHMARK_SUMMARY_OUT: ${{ github.workspace }}/target/m2.5-results/browser-summary.md
+          RUSEACT_BENCHMARK_SOURCE_SHA: ${{ github.sha }}
+        run: corepack pnpm benchmark:browser
+      - name: Print benchmark summaries before integrity gate
+        run: |
+          cat target/m2.5-results/node-summary.md
+          cat target/m2.5-results/browser-summary.md
+      - name: Validate benchmark result formats
+        run: corepack pnpm benchmark:validate -- target/m2.5-results/node-results.json target/m2.5-results/browser-results.json
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruseact-m2.5-benchmark-${{ github.sha }}
+          path: target/m2.5-results
+          if-no-files-found: warn
+          retention-days: 14

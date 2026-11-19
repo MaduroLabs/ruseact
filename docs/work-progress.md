@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m2.4-browser-integration`
+- Branch: `feature/m2.5-wasm-performance`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `64794fcc7067ce88671658d6299bed2557789e27`
-- Last verified on: Linux x86_64, 2026-11-18 for M2.4 local-supported checks;
+- Baseline: `origin/develop` at `5abd62aa7735442e6d8dfbc40c0758a3b97999f2`
+- Last verified on: Linux x86_64, 2026-11-19 for M2.5 local-supported checks;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, and M2.3 are merged into this baseline
 
 ## Completed
@@ -74,6 +74,22 @@
   pinned Node, pnpm, Rust, and `wasm-bindgen` versions.
 - [x] Documented the browser loading path, CI authority, and the InstaBox
   localhost networking limitation without weakening browser verification.
+- [x] Added the M2.5 test-only direct-WASM and public-TypeScript benchmark
+  workload harness for 16-, 64-, and 256-signal fixtures, including signal,
+  dependency, dirty propagation, batching, pending transfer, initialization,
+  and lifecycle measurements.
+- [x] Added structured JSON/Markdown result export, independent correctness
+  checks, result-format validation, and a manually dispatched Ubuntu Chromium
+  benchmark workflow with artifact upload.
+- [x] Corrected M2.5 Chromium completion and timing measurement: removed
+  virtual-time/DOM-dump completion, added real-time DevTools Protocol polling,
+  browser timer-resolution metadata, calibrated short workloads, and fail-closed
+  result-integrity checks for unresolved rows.
+- [x] Added bounded adaptive per-workload calibration: prepared independent
+  states are measured before official trials, expanded only up to eight states
+  toward the timer-resolution target, with 64 prepared states and a 50 ms
+  calibration-sample bound; diagnostic artifacts upload even when
+  the integrity gate fails.
 
 ## In progress / next
 
@@ -86,6 +102,11 @@
   and structured-error contract.
 - [x] Validate browser bundler loading and host integration in M2.4; the
   authoritative GitHub-hosted Chromium job passed for this feature revision.
+- [x] Complete the corrected authoritative M2.5 Node 24 and Chromium benchmark
+  workflow; run `44460980319` passed the Benchmark and Browser jobs with
+  263/263 valid workload rows in each report. Artifact `14499858517` was
+  created; per-workload numeric values remain artifact-only because its ZIP
+  endpoint was unavailable from this InstaBox session.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -181,6 +202,17 @@
   `Browser (chromium)`, used Google Chrome `157.0.8103.50` on Ubuntu 26.04.1,
   generated `wasm-bindgen --target web` bindings, loaded the actual WASM
   module through `createReactiveCore(loadWasm)`, and passed 94 assertions.
+- M2.5 local Node benchmark diagnostic — PASS on InstaBox with Node `22.23.3`:
+  263/263 structured result rows across direct WASM and TypeScript layers after
+  adaptive calibration; zero unresolved, zero-median, zero-sample,
+  non-finite, and calibration-limit rows; the integrity and result-format
+  validators passed. The
+  authoritative pinned Node 24 and hosted Chromium results are recorded after
+  the corrected pull-request benchmark workflow completes.
+- M2.5 hosted benchmark validation — PASS: run `44460980319`, Benchmark and
+  Browser jobs passed; Node and Chromium each produced 263/263 valid rows with
+  no unresolved, zero-median, zero-sample, non-finite, or calibration-limit
+  rows. Artifact `14499858517` was uploaded.
 
 ## Blockers / decisions
 
@@ -222,3 +254,11 @@
   currently passes but is not yet listed in the active develop or main
   required-check rulesets; repository administrators must add it if browser
   verification is intended to gate merges.
+- M2.5 benchmark timing has no performance pass/fail threshold, but its
+  integrity gate rejects missing, non-finite, zero-sample, all-zero,
+  zero-median, or calibration-limit rows.
+  Browser completion uses real-time DevTools Protocol polling rather than
+  Chromium virtual time or `--dump-dom`. The hosted benchmark workflow uploads
+  results as artifacts; local Node diagnostics use host Node `22.23.3` when the
+  pinned Node `24.22.3` binary is unavailable. No memory metric or
+  cross-machine speed claim is made.

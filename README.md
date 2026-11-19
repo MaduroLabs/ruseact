@@ -43,6 +43,7 @@ API compatibility is claimed.
 | M2.2.1 — Computation identity bridge | Complete |
 | M2.3 — TypeScript runtime bridge | Complete |
 | M2.4 — Browser and WASM integration testing | Implemented; CI verification passed, pending review |
+| M2.5 — WASM bridge performance benchmark | Complete; hosted measurement integrity passed, pending review |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime implemented; M2.4 browser verification is in progress |
 | DOM renderer               | Not implemented |
@@ -83,6 +84,10 @@ The Rust reactive core supports:
   and computation handles, explicit disposal, scalar validation, dependency
   operations, nested batching, structured `CoreResult` errors, and safe
   pending-computation identity resolution.
+- A test-only M2.5 benchmark harness that separates direct generated WASM
+  calls, public TypeScript runtime calls, and real Chromium execution. It
+  records deterministic 16/64/256-signal workloads, raw samples, summaries,
+  correctness checks, and structured artifacts without changing runtime APIs.
 
 Computation execution, automatic dependency tracking, and scheduling are not
 yet implemented. The DOM renderer, compiler, browser bundler matrix, and
@@ -162,6 +167,34 @@ if browser verification is to gate merges; this PR does not modify rulesets.
 After a successful browser CI run, the branch remains subject to normal manual
 review and protected-branch workflow. M2.5 will define performance
 measurements; M2.4 makes no rendering or WASM performance claims.
+
+## M2.5 WASM bridge performance benchmark
+
+M2.5 measures the existing runtime only. The benchmark covers scalar signal
+operations, dependency metadata, dirty propagation, pending identity transfer,
+explicit batching, initialization, and lifecycle work at 16, 64, and 256
+signals. Direct WASM and public TypeScript rows remain separate because the
+public layer performs handle validation, result normalization, and registry
+work that direct calls do not. Browser runs use real Chromium with a DevTools
+Protocol completion signal and real `performance.now()`; virtual-time and
+`--dump-dom` completion are not used for performance measurements. Zero-median
+or non-finite rows fail the benchmark integrity gate rather than being treated
+as zero-cost operations. Short workloads first calibrate from their existing
+operation counts against the measured browser timer resolution, using bounded
+independent prepared states and recording the resulting operation count.
+
+Run the manually reproducible Node benchmark after building matching bindings:
+
+```bash
+RUSEACT_WASM_BINDGEN_OUT="$PWD/target/m2.5-node-bindgen" \
+corepack pnpm benchmark:node
+```
+
+The authoritative Node and real-Chromium run is the manually dispatched
+`.github/workflows/m2.5-benchmark.yml`; it uploads JSON and Markdown results
+and does not establish timing thresholds or a merge gate. See
+[docs/benchmarks/m2.5-wasm-bridge-baseline.md](docs/benchmarks/m2.5-wasm-bridge-baseline.md)
+for fixture accounting, methodology, results, limitations, and M3 handoff.
 
 ## M1.5 core verification and benchmark baseline
 

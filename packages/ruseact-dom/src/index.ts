@@ -1,7 +1,7 @@
 /**
  * Browser host-adapter package boundary.
  *
- * DOM ownership, event lifecycle, and rendering are intentionally deferred
- * beyond M0.
+ * M3.2 host operations remain internal while the public root, binding, and
+ * lifecycle contracts from M3.1 are pending approval.
  */
 export {};

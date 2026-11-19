@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m3.1-dom-renderer-design`
+- Branch: `feature/m3.2-dom-host-operations`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `ab4158cdbe5356ce90849a681a8c93d360d3d06a`
-- Last verified on: Linux x86_64, 2026-11-19 for M3.1 design pre-flight;
+- Baseline: `origin/develop` at `f31b3e67e4005cea54a0ea3a7bc08969a0448cbb`
+- Last verified on: Linux x86_64, 2026-11-19 for M3.2 host implementation;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
@@ -96,6 +96,12 @@
   ownership, rendering alternatives, explicit reactive bindings, lifecycle,
   host operations, compiler/component boundaries, tests, performance, and the
   separate examples-repository handoff.
+- [x] Implemented the internal M3.2 DOM host context with owned HTML/text
+  creation, deterministic insertion/removal, safe text/attribute mutation,
+  narrow native properties, native event lifecycle, ownership validation, and
+  explicit cleanup without a public renderer API.
+- [x] Added the real Chromium M3.2 host test command and preserved the existing
+  M2 browser/WASM integration command in the hosted CI job.
 
 ## In progress / next
 
@@ -113,10 +119,11 @@
   263/263 valid workload rows in each report. Artifact `14499858517` was
   created; per-workload numeric values remain artifact-only because its ZIP
   endpoint was unavailable from this InstaBox session.
-- [ ] Obtain human approval for the M3.1 hybrid renderer direction and open
+- [x] Obtain human approval for the M3.1 hybrid renderer direction and open
   decisions before starting M3.2 implementation.
-- [ ] Implement only the approved M3.2 DOM host and explicit binding subset;
-  do not add computation execution, automatic tracking, or a scheduler here.
+- [ ] Add the M3.3 explicit reactive-binding execution only after its public
+  view, root, flush, and lifecycle contracts receive approval; do not add
+  automatic tracking or a scheduler in M3.2.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -229,6 +236,14 @@
   `wasm-bindgen-cli 0.2.130` Node bindings, and existing real Node/WASM
   TypeScript integration test also passed. No local Chromium result is claimed;
   the existing hosted Ubuntu browser job remains authoritative.
+- M3.2 local validation — PASS for Rust formatting, Clippy, workspace tests,
+  wasm32 workspace check, TypeScript typecheck, strict host-module compilation,
+  browser-test script syntax, skill validation, workflow policy, automation
+  gate, and the existing optimized Node/WASM runtime integration test. The
+  required frozen pnpm install was attempted twice but the InstaBox pnpm store
+  operation lock is on a read-only filesystem; no dependency or lockfile
+  change was made. The new real Chromium DOM test remains authoritative in
+  hosted CI.
 
 ## Blockers / decisions
 
@@ -282,3 +297,6 @@
   approval before M3.2. No runtime source, WASM ABI, public TypeScript API,
   compiler, scheduler, DOM operation, or example application is added by this
   milestone.
+- M3.2 deliberately keeps host operations internal. The public root lifecycle,
+  reactive binding execution, component identity, view descriptors, and flush
+  semantics remain deferred to M3.3 or a separately approved milestone.

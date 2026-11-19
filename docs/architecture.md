@@ -391,3 +391,36 @@ computation execution, scheduling, DOM rendering, JSX compilation, browser
 bundler packaging, worker transfer, or React Hooks. The M2.4 handoff is a
 browser/bundler integration matrix over this loader boundary, including real
 browser WASM initialization, package output, and host-renderer integration.
+
+## Decision 18: M2.4 browser and WASM integration verification
+
+M2.4 verifies the existing M2.3 runtime in a browser without changing the
+RustReactiveCore or WASM ABI. A release `wasm32-unknown-unknown` artifact is
+adapted with the matching `wasm-bindgen` CLI using `--target web`. The generated
+ES module and adjacent `.wasm` file are served by a temporary HTTP server with
+the required JavaScript and WebAssembly MIME types. The browser harness loads
+the module through the existing explicit `createReactiveCore(loadWasm)` boundary,
+so runtime operations remain synchronous after asynchronous module
+initialization.
+
+The harness uses native browser ES modules and a Chromium executable. It
+exercises scalar round trips and equality, dependency operations, nested batch
+draining, FIFO pending identity resolution, multiple runtime instances,
+structured operational errors, stale handles, and explicit disposal. It does
+not implement DOM rendering, computation execution, scheduling, JSX, or
+automatic dependency tracking. The browser test is bounded, uses a dynamically
+assigned loopback port, waits for the server to bind before launching the
+browser, records requests, and cleans up its temporary server, profile, and
+generated runtime output.
+
+The authoritative browser environment is the GitHub-hosted `ubuntu-latest`
+runner defined by the CI workflow. In the current InstaBox environment,
+Chromium can access external HTTPS resources but cannot reach the local HTTP
+server; this is recorded as a local-environment limitation rather than treated
+as evidence about the runtime. Local Rust, WASM-build, TypeScript, and Node/WASM
+checks remain useful, while browser assertions are counted as passing only
+when the hosted Chromium job executes them.
+
+M2.4 does not claim compatibility with every browser, bundler, worker, or
+packaging mode. The tested web-module path is the handoff for M2.5 performance
+measurement; no rendering or browser performance conclusion is made.

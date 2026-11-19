@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m2.4-browser-integration`
+- Branch: `feature/m2.5-wasm-performance`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `64794fcc7067ce88671658d6299bed2557789e27`
-- Last verified on: Linux x86_64, 2026-11-18 for M2.4 local-supported checks;
+- Baseline: `origin/develop` at `5abd62aa7735442e6d8dfbc40c0758a3b97999f2`
+- Last verified on: Linux x86_64, 2026-11-19 for M2.5 local-supported checks;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, and M2.3 are merged into this baseline
 
 ## Completed
@@ -74,6 +74,13 @@
   pinned Node, pnpm, Rust, and `wasm-bindgen` versions.
 - [x] Documented the browser loading path, CI authority, and the InstaBox
   localhost networking limitation without weakening browser verification.
+- [x] Added the M2.5 test-only direct-WASM and public-TypeScript benchmark
+  workload harness for 16-, 64-, and 256-signal fixtures, including signal,
+  dependency, dirty propagation, batching, pending transfer, initialization,
+  and lifecycle measurements.
+- [x] Added structured JSON/Markdown result export, independent correctness
+  checks, result-format validation, and a manually dispatched Ubuntu Chromium
+  benchmark workflow with artifact upload.
 
 ## In progress / next
 
@@ -86,6 +93,8 @@
   and structured-error contract.
 - [x] Validate browser bundler loading and host integration in M2.4; the
   authoritative GitHub-hosted Chromium job passed for this feature revision.
+- [ ] Complete the authoritative M2.5 Node 24 and Chromium benchmark workflow;
+  record its artifact results in `docs/benchmarks/m2.5-wasm-bridge-baseline.md`.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -181,6 +190,10 @@
   `Browser (chromium)`, used Google Chrome `157.0.8103.50` on Ubuntu 26.04.1,
   generated `wasm-bindgen --target web` bindings, loaded the actual WASM
   module through `createReactiveCore(loadWasm)`, and passed 94 assertions.
+- M2.5 local Node benchmark diagnostic — PASS on InstaBox with Node `22.23.3`:
+  257 structured result rows across direct WASM and TypeScript layers; the
+  result-format validator passed. The authoritative pinned Node 24 and hosted
+  Chromium results are recorded after the manual benchmark workflow completes.
 
 ## Blockers / decisions
 
@@ -222,3 +235,8 @@
   currently passes but is not yet listed in the active develop or main
   required-check rulesets; repository administrators must add it if browser
   verification is intended to gate merges.
+- M2.5 benchmark timing is diagnostic and has no pass/fail threshold. The
+  hosted benchmark workflow is manual and uploads results as artifacts; local
+  Node diagnostics use host Node `22.23.3` when the pinned Node `24.22.3`
+  binary is unavailable. No memory metric or cross-machine speed claim is
+  made.

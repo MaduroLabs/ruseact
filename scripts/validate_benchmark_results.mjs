@@ -41,6 +41,12 @@ const requiredOperations = new Set([
 
 for (const filePath of paths) {
   const report = JSON.parse(readFileSync(filePath, "utf8"));
+  if (report.integrity !== undefined && report.integrity.status !== "pass") {
+    const unresolved = report.results
+      .filter((row) => row.median_ns === 0 || row.samples_ns.some((value) => value === 0))
+      .map((row) => `${row.layer}/${row.operation}/${row.size ?? "cold"}`);
+    console.error(`${filePath}: measurement integrity diagnostics: ${JSON.stringify({ ...report.integrity, unresolved })}`);
+  }
   check(report.schema_version === 1, `${filePath}: schema version`);
   check(report.configuration?.trials >= 2, `${filePath}: trial count`);
   check(report.configuration?.warmups >= 1, `${filePath}: warmup count`);

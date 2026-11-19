@@ -269,7 +269,7 @@ function browserPage() {
         check(!container.contains(root), "dispose removes owned DOM nodes");
         expectError(() => context.createTextNode("after dispose"), "disposed_context", "disposed context rejects creation");
 
-        report({ ok: true, checks });
+        window.__ruseactPublish({ ok: true, checks });
       } catch (error) {
         window.__ruseactPublish({
           ok: false,

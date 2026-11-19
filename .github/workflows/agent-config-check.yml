@@ -159,12 +159,12 @@ jobs:
           RUSEACT_BENCHMARK_OUT: ${{ github.workspace }}/target/m2.5-results/browser-results.json
           RUSEACT_BENCHMARK_SUMMARY_OUT: ${{ github.workspace }}/target/m2.5-results/browser-summary.md
         run: corepack pnpm benchmark:browser
-      - name: Validate benchmark result formats
-        run: corepack pnpm benchmark:validate -- target/m2.5-results/node-results.json target/m2.5-results/browser-results.json
-      - name: Print benchmark summaries
+      - name: Print benchmark summaries before integrity gate
         run: |
           cat target/m2.5-results/node-summary.md
           cat target/m2.5-results/browser-summary.md
+      - name: Validate benchmark result formats
+        run: corepack pnpm benchmark:validate -- target/m2.5-results/node-results.json target/m2.5-results/browser-results.json
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:

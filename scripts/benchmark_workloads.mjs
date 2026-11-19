@@ -4,6 +4,8 @@ const WARMUPS = 2;
 const REPEATED_OPERATIONS = 1024;
 const READ_REPETITIONS = 128;
 const DEPENDENCY_COUNT = 8;
+const SHORT_OPERATION_REPETITIONS = 8;
+const TRANSFER_REPETITIONS = 8;
 
 export const BENCHMARK_CONFIG = Object.freeze({
   schema_version: 1,
@@ -13,6 +15,8 @@ export const BENCHMARK_CONFIG = Object.freeze({
   repeated_operations: REPEATED_OPERATIONS,
   read_repetitions: READ_REPETITIONS,
   dependency_count: DEPENDENCY_COUNT,
+  short_operation_repetitions: SHORT_OPERATION_REPETITIONS,
+  transfer_repetitions: TRANSFER_REPETITIONS,
   timer_resolution_policy: "zero-median rows are unresolved and fail result validation",
   p95_method: "nearest-rank sample quantile",
 });
@@ -545,14 +549,16 @@ async function addDependencyCases(results, clock, layerName, directModule, runti
 
     results.push(await measureCase(
       clock,
-      { ...base, operation: "computation_creation", setup_operations: 0, computation_count: computationCount, timed_operations: computationCount, cleanup: "dispose computations and graph" },
+      { ...base, operation: "computation_creation", setup_operations: 0, computation_count: computationCount * SHORT_OPERATION_REPETITIONS, timed_operations: computationCount * SHORT_OPERATION_REPETITIONS, cleanup: "dispose computations and graph" },
       async () => ({ layer: await createLayer(layerName, directModule, runtimeModule, wasmModule), computations: [], signals: [], graphLive: true }),
       (state) => {
-        for (let index = 0; index < computationCount; index += 1) state.computations.push({ value: state.layer.computation(), live: true });
+        for (let repetition = 0; repetition < SHORT_OPERATION_REPETITIONS; repetition += 1) {
+          for (let index = 0; index < computationCount; index += 1) state.computations.push({ value: state.layer.computation(), live: true });
+        }
         return state.computations.length;
       },
       disposeState,
-      async (observed) => check(observed === computationCount, "computation creation count"),
+        async (observed) => check(observed === computationCount * SHORT_OPERATION_REPETITIONS, "computation creation count"),
     ));
 
     if (layerName === "direct-wasm") {
@@ -629,12 +635,13 @@ async function addDependencyCases(results, clock, layerName, directModule, runti
     ));
 
     for (const operation of ["computation_disposal", "dependency_cleanup_signal_disposal"]) {
+      const disposalComputationCount = operation === "computation_disposal" ? computationCount * SHORT_OPERATION_REPETITIONS : computationCount;
       results.push(await measureCase(
         clock,
-        { ...base, operation, dependency_edges: size, computation_count: computationCount, affected_computations: computationCount, timed_operations: operation === "computation_disposal" ? computationCount : size, cleanup: "dispose remaining resources and graph" },
+        { ...base, operation, dependency_edges: operation === "computation_disposal" ? disposalComputationCount * 4 : size, computation_count: disposalComputationCount, affected_computations: disposalComputationCount, timed_operations: operation === "computation_disposal" ? disposalComputationCount : size, cleanup: "dispose remaining resources and graph" },
         async () => {
           const layer = await createLayer(layerName, directModule, runtimeModule, wasmModule);
-          return await buildGraph(layer, size, { computationCount, degree: 4, connect: true });
+          return await buildGraph(layer, size, { computationCount: disposalComputationCount, degree: 4, connect: true });
         },
         (state) => {
           if (operation === "computation_disposal") {
@@ -651,7 +658,7 @@ async function addDependencyCases(results, clock, layerName, directModule, runti
           return state.signals.length;
         },
         disposeState,
-        async (observed) => check(observed === (operation === "computation_disposal" ? computationCount : size), `${operation} count`),
+        async (observed) => check(observed === (operation === "computation_disposal" ? disposalComputationCount : size), `${operation} count`),
       ));
     }
   }
@@ -838,19 +845,31 @@ async function addBatchCases(results, clock, layerName, directModule, runtimeMod
 
     results.push(await measureCase(
       clock,
-      { ...base, operation: "pending_transfer_after_batch", setup_operations: size + computationCount + updateCount * computationCount + updateCount + 3, pending_pairs: computationCount, timed_operations: computationCount, cleanup: "dispose fixture and graph" },
+      { ...base, operation: "pending_transfer_after_batch", setup_operations: (size + computationCount + updateCount * computationCount + updateCount + 3) * TRANSFER_REPETITIONS, pending_pairs: computationCount, timed_operations: computationCount * TRANSFER_REPETITIONS, cleanup: "dispose transfer fixtures and graphs" },
       async () => {
-        const state = await buildGraph(await createLayer(layerName, directModule, runtimeModule, wasmModule), size, { computationCount, sharedSignals: updateCount });
-        state.layer.beginBatch();
-        for (let signalIndex = 0; signalIndex < updateCount; signalIndex += 1) state.layer.set(state.signals[signalIndex].value, signalIndex + 9000);
-        state.layer.endBatch();
-        return state;
+        const states = [];
+        for (let repetition = 0; repetition < TRANSFER_REPETITIONS; repetition += 1) {
+          const state = await buildGraph(await createLayer(layerName, directModule, runtimeModule, wasmModule), size, { computationCount, sharedSignals: updateCount });
+          state.layer.beginBatch();
+          for (let signalIndex = 0; signalIndex < updateCount; signalIndex += 1) state.layer.set(state.signals[signalIndex].value, signalIndex + 9000 + repetition);
+          state.layer.endBatch();
+          states.push(state);
+        }
+        return { states };
       },
-      (state) => pendingCount(state.layer, state.layer.pending()),
-      disposeState,
+      (state) => {
+        let transferred = 0;
+        for (const transferState of state.states) {
+          transferred += pendingCount(transferState.layer, transferState.layer.pending());
+        }
+        return transferred;
+      },
+      async (state) => {
+        for (const transferState of state.states) await disposeState(transferState);
+      },
       async (observed, state) => {
-        check(observed === computationCount, "batch pending transfer count");
-        check(pendingCount(state.layer, state.layer.pending()) === 0, "batch pending queue drained");
+        check(observed === computationCount * TRANSFER_REPETITIONS, "batch pending transfer count");
+        for (const transferState of state.states) check(pendingCount(transferState.layer, transferState.layer.pending()) === 0, "batch pending queue drained");
       },
     ));
   }
@@ -881,15 +900,22 @@ async function addLifecycleCases(results, clock, layerName, directModule, runtim
 
     results.push(await measureCase(
       clock,
-      { ...base, operation: "explicit_graph_disposal", setup_operations: size + computationCount + size, computation_count: computationCount, dependency_edges: size, timed_operations: 1, cleanup: "release bridge object" },
-      async () => ({ ...(await buildGraph(await createLayer(layerName, directModule, runtimeModule, wasmModule), size, { computationCount, degree: 4, connect: true })) }),
-      (state) => {
-        state.layer.disposeGraph();
-        state.graphLive = false;
-        return 1;
+      { ...base, operation: "explicit_graph_disposal", setup_operations: (size + computationCount + computationCount * 4) * SHORT_OPERATION_REPETITIONS, computation_count: computationCount * SHORT_OPERATION_REPETITIONS, dependency_edges: computationCount * 4 * SHORT_OPERATION_REPETITIONS, timed_operations: SHORT_OPERATION_REPETITIONS, cleanup: "release bridge objects" },
+      async () => {
+        const graphs = [];
+        for (let repetition = 0; repetition < SHORT_OPERATION_REPETITIONS; repetition += 1) {
+          graphs.push(await buildGraph(await createLayer(layerName, directModule, runtimeModule, wasmModule), size, { computationCount, degree: 4, connect: true }));
+        }
+        return { graphs };
       },
-      async (state) => state.layer.release(),
-      async (observed) => check(observed === 1, "graph disposal count"),
+      (state) => {
+        for (const graph of state.graphs) graph.layer.disposeGraph();
+        return state.graphs.length;
+      },
+      async (state) => {
+        for (const graph of state.graphs) graph.layer.release();
+      },
+      async (observed) => check(observed === SHORT_OPERATION_REPETITIONS, "graph disposal count"),
     ));
 
     results.push(await measureCase(

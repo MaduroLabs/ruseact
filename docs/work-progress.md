@@ -102,9 +102,11 @@
   and structured-error contract.
 - [x] Validate browser bundler loading and host integration in M2.4; the
   authoritative GitHub-hosted Chromium job passed for this feature revision.
-- [ ] Complete the corrected authoritative M2.5 Node 24 and Chromium benchmark
-  workflow; record its artifact results in
-  `docs/benchmarks/m2.5-wasm-bridge-baseline.md`.
+- [x] Complete the corrected authoritative M2.5 Node 24 and Chromium benchmark
+  workflow; run `44460386480` passed the Benchmark and Browser jobs with
+  263/263 valid workload rows in each report. Artifact `14500415338` was
+  created; per-workload numeric values remain artifact-only because its ZIP
+  endpoint was unavailable from this InstaBox session.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -207,6 +209,10 @@
   validators passed. The
   authoritative pinned Node 24 and hosted Chromium results are recorded after
   the corrected pull-request benchmark workflow completes.
+- M2.5 hosted benchmark validation — PASS: run `44460386480`, Benchmark and
+  Browser jobs passed; Node and Chromium each produced 263/263 valid rows with
+  no unresolved, zero-median, zero-sample, non-finite, or calibration-limit
+  rows. Artifact `14500415338` was uploaded.
 
 ## Blockers / decisions
 

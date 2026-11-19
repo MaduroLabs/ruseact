@@ -43,7 +43,7 @@ API compatibility is claimed.
 | M2.2.1 — Computation identity bridge | Complete |
 | M2.3 — TypeScript runtime bridge | Complete |
 | M2.4 — Browser and WASM integration testing | Implemented; CI verification passed, pending review |
-| M2.5 — WASM bridge performance benchmark | Implemented; corrected hosted measurement verification in progress |
+| M2.5 — WASM bridge performance benchmark | Complete; hosted measurement integrity passed, pending review |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime implemented; M2.4 browser verification is in progress |
 | DOM renderer               | Not implemented |

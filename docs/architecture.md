@@ -484,3 +484,53 @@ keyed-list behavior, attribute/property policy, compiler output versioning,
 external DOM mutation handling, and any future Rust mutation-intent protocol.
 M3.2 must remain limited to the approved subset and must not introduce React
 Fiber, a hidden scheduler, JSX compilation, or speculative runtime changes.
+
+## Decision 21: M3.2 implements internal DOM host operations only
+
+M3.2 implements the internal browser mutation layer described by the M3.1
+proposal. The implementation is in `packages/ruseact-dom/src/host.ts`; the
+package entry point remains empty so `createRoot`, `mount`, `flush`,
+`unmount`, view descriptors, and binding APIs are not published or silently
+finalized.
+
+`createHostContext(document)` returns an internal host context. A caller must
+explicitly `claimContainer` before using an existing element or document
+fragment as a host parent. The context creates HTML elements with
+`document.createElement`, creates text with `document.createTextNode`, and
+uses `document.createElementNS` only for the explicitly supported HTML
+namespace. SVG and other namespaces are rejected rather than falling back to
+HTML.
+
+The host supports owned `insertBefore`, append, and remove operations. Parent,
+child, and anchor records are validated through a module-private `WeakMap`.
+Nodes may move within their owning context through insertion, but foreign
+parents, foreign documents, invalid anchors, invalid parent-child pairs, and
+already-detached nodes fail with structured internal `DomHostError` values.
+The host never adopts an unknown node implicitly and never removes an
+unrelated container child.
+
+Text and string attributes use native DOM APIs and skip writes when the
+existing value is already equal. Attribute operations remain distinct from
+property operations. M3.2 permits only the narrow `value`, `checked`, and
+`disabled` properties on compatible HTML elements, validates value types, and
+rejects arbitrary property names. Ordinary text is never interpreted as HTML.
+
+Event listeners remain JavaScript-owned. The host stores the original handler,
+type, capture semantics, options, and native wrapper in a per-context record;
+duplicate registrations are idempotent, exact removal is required, and
+context disposal removes all remaining native listeners. AbortSignal listener
+options are intentionally unsupported until a signal-aware ownership contract
+is approved.
+
+Disposal marks the context inactive before cleanup, releases listener records,
+removes owned nodes only when their parent and descendants are safe to mutate,
+preserves unrelated DOM, and invalidates all ownership records. Later calls
+fail with `disposed_context`. This is explicit resource cleanup, not a claim
+of memory-leak freedom.
+
+M3.2 changes no RustReactiveCore behavior, WASM ABI, TypeScript runtime
+behavior, scheduling, computation execution, dependency tracking, component
+execution, JSX compiler, or renderer-root lifecycle. Real DOM correctness is
+verified by the separate hosted Chromium test command. M3.3 may consume this
+internal host boundary when the public root and reactive-binding contracts
+receive explicit approval.

@@ -46,9 +46,10 @@ API compatibility is claimed.
 | M2.4 — Browser and WASM integration testing | Complete; hosted CI verification passed |
 | M2.5 — WASM bridge performance benchmark | Complete; hosted measurement integrity passed |
 | M3.1 — DOM renderer architecture design | Design drafted; pending human architecture review |
+| M3.2 — DOM host operations | Internal host adapter implemented; hosted browser validation pending |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
-| DOM renderer               | M3.1 design drafted; implementation not started |
+| DOM renderer               | M3.1 design approved; M3.2 internal host operations in progress |
 | Compiler integration       | Not implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
@@ -86,6 +87,11 @@ The Rust reactive core supports:
   and computation handles, explicit disposal, scalar validation, dependency
   operations, nested batching, structured `CoreResult` errors, and safe
   pending-computation identity resolution.
+- An internal `packages/ruseact-dom` host context for owned HTML element and
+  text creation, deterministic insertion/removal, safe text and attribute
+  updates, narrow `value`/`checked`/`disabled` property writes, native event
+  listener lifecycle, ownership validation, and explicit cleanup. The host
+  context is not exported from the package entry point.
 - A test-only M2.5 benchmark harness that separates direct generated WASM
   calls, public TypeScript runtime calls, and real Chromium execution. It
   records deterministic 16/64/256-signal workloads, raw samples, summaries,
@@ -123,6 +129,30 @@ The planned DOM renderer design and M3.2 implementation handoff are recorded
 in [docs/dom-renderer-design.md](docs/dom-renderer-design.md). Example
 applications, including a future Counter consumer, remain in the separate
 `ruseact-examples` repository and are not added here.
+
+## M3.2 internal DOM host operations
+
+M3.2 establishes the internal browser mutation layer in
+`packages/ruseact-dom/src/host.ts`. A host context explicitly claims a future
+root container and owns nodes it creates. A module-private ownership registry
+rejects foreign-context and foreign-document mutations, while disposal
+removes only safe, owned nodes and releases listener records. Unrelated
+container children are preserved.
+
+The implemented host supports HTML element and text creation, deterministic
+`insertBefore`/append/remove operations, escaped text updates, string
+attributes, the narrow `value`/`checked`/`disabled` property set, and native
+event listeners with duplicate detection and exact cleanup. The HTML namespace
+is the only supported namespace; SVG is intentionally rejected. Invalid,
+foreign, detached, and disposed resources produce internal `DomHostError`
+values. Raw HTML, arbitrary property assignment, synthetic events, a virtual
+DOM, and a public root lifecycle are not implemented.
+
+The browser test command is `corepack pnpm test:browser:dom`. It uses the
+existing hosted Chromium job; the InstaBox environment is not treated as an
+authoritative local browser environment because it cannot reliably reach its
+own temporary HTTP server. Reactive bindings, computation execution, and the
+public root/flush lifecycle remain deferred to M3.3 and later approved work.
 
 ## Development
 

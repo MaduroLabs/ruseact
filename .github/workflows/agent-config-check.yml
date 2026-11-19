@@ -104,6 +104,8 @@ jobs:
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
         run: pnpm test:browser
+      - name: Run real Chromium DOM host tests
+        run: pnpm test:browser:dom
 
   benchmark:
     name: Benchmark (M2.5)

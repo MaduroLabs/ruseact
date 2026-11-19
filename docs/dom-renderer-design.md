@@ -858,7 +858,41 @@ hydration, a general virtual DOM, React Hooks, broad SVG support, server
 rendering, or a compiler implementation unless a separate milestone expands
 the approved scope.
 
-## 19. Summary
+## 19. M3.2 implementation note
+
+M3.2 implements the first internal host subset without resolving the public
+renderer decisions above. `packages/ruseact-dom/src/host.ts` provides
+`createHostContext(document)` and an internal `HostContext` with explicit
+container claiming, HTML element/text creation, insertion/removal, text and
+attribute mutation, narrow native property writes, event registration, and
+cleanup. `packages/ruseact-dom/src/index.ts` remains non-exporting.
+
+The host uses a module-private `WeakMap<Node, NodeRecord>` to associate a DOM
+node with one context. Contexts can move owned nodes within that context, but
+cannot adopt unknown or foreign nodes. Created nodes that are externally moved
+or removed become unusable; explicit host removal marks a subtree detached.
+Context cleanup removes only safe owned nodes and preserves unrelated children
+of a claimed container. Listener records retain native wrapper identity and
+are released on exact removal, `once` delivery, or context disposal.
+
+The supported property set is intentionally limited to `value` on input,
+textarea, and select elements; `checked` on input; and `disabled` on the
+compatible native controls. HTML is the only supported namespace. There is no
+raw HTML operation, arbitrary property writer, SVG implementation, synthetic
+event system, virtual DOM, reactive binding execution, scheduler, or public
+root lifecycle.
+
+The hosted browser command is `corepack pnpm test:browser:dom`, added beside
+the existing M2 browser integration in CI. It tests real DOM APIs, ownership,
+detachment, ordering, properties, event dispatch/cleanup, disposal, and
+preservation of unrelated nodes. Local InstaBox Chromium is not authoritative
+because of its documented loopback HTTP limitation.
+
+M3.3 can build on this host boundary for explicit reactive binding execution
+only after the public view descriptor, root ownership, flush semantics, and
+binding lifecycle decisions are approved. M3.2 does not make those decisions.
+
+## 20. Summary
 
 M2 supplies a deterministic reactive invalidation substrate, not a renderer.
 The safest first DOM architecture is therefore an explicitly owned

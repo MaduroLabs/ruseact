@@ -87,7 +87,7 @@
   result-integrity checks for unresolved rows.
 - [x] Added bounded adaptive per-workload calibration: prepared independent
   states are measured before official trials, expanded only up to eight states
-  toward the timer-resolution target, with eight prepared states and a 50 ms
+  toward the timer-resolution target, with 64 prepared states and a 50 ms
   calibration-sample bound; diagnostic artifacts upload even when
   the integrity gate fails.
 

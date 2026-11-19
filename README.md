@@ -23,7 +23,8 @@ Ruseact explores a different separation of responsibilities:
 - **Rust:** Reactive graph, signal identity, dependency management, and future
   scheduling.
 - **TypeScript/JavaScript:** Component execution and browser-facing integration.
-- **DOM adapter:** Planned browser rendering and event handling.
+- **DOM adapter:** The M3.1 renderer architecture is documented; browser
+  rendering and event handling remain unimplemented.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -42,11 +43,12 @@ API compatibility is claimed.
 | M2.2 — Rust WASM exports | Complete |
 | M2.2.1 — Computation identity bridge | Complete |
 | M2.3 — TypeScript runtime bridge | Complete |
-| M2.4 — Browser and WASM integration testing | Implemented; CI verification passed, pending review |
-| M2.5 — WASM bridge performance benchmark | Complete; hosted measurement integrity passed, pending review |
+| M2.4 — Browser and WASM integration testing | Complete; hosted CI verification passed |
+| M2.5 — WASM bridge performance benchmark | Complete; hosted measurement integrity passed |
+| M3.1 — DOM renderer architecture design | Design drafted; pending human architecture review |
 | Scheduling and execution   | Not implemented |
-| WASM integration           | M2.3 Node/WASM runtime implemented; M2.4 browser verification is in progress |
-| DOM renderer               | Not implemented |
+| WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
+| DOM renderer               | M3.1 design drafted; implementation not started |
 | Compiler integration       | Not implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
@@ -93,6 +95,13 @@ Computation execution, automatic dependency tracking, and scheduling are not
 yet implemented. The DOM renderer, compiler, browser bundler matrix, and
 worker handle transfer are also not implemented.
 
+M3.1 documents a proposed DOM renderer architecture in
+[docs/dom-renderer-design.md](docs/dom-renderer-design.md). The proposal
+recommends a hybrid design with compiler-assisted static templates and
+fine-grained JavaScript-owned DOM bindings, plus an explicit fallback while
+compiler work is pending. It does not add renderer code, computation
+execution, automatic dependency tracking, scheduling, or a public DOM API.
+
 ## Repository structure
 
 - `crates/ruseact-core` — Platform-independent Rust reactive core.
@@ -100,7 +109,7 @@ worker handle transfer are also not implemented.
   scalar and reactive-identity ABI.
 - `packages/ruseact` — TypeScript runtime bridge and future JSX/compiler
   interface.
-- `packages/ruseact-dom` — Future DOM integration.
+- `packages/ruseact-dom` — Browser host adapter boundary; M3.1 is design-only.
 - `docs` — Architecture decisions and technical documentation.
 
 The [M2.1 WASM ABI design](docs/wasm-abi-design.md) records the reviewed
@@ -109,6 +118,11 @@ implement the Rust bridge; M2.3 adds the typed runtime wrapper without
 duplicating the reactive engine.
 
 Example applications are maintained in a separate repository.
+
+The planned DOM renderer design and M3.2 implementation handoff are recorded
+in [docs/dom-renderer-design.md](docs/dom-renderer-design.md). Example
+applications, including a future Counter consumer, remain in the separate
+`ruseact-examples` repository and are not added here.
 
 ## Development
 

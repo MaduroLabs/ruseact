@@ -1,8 +1,8 @@
 const SIZES = [16, 64, 256];
 const TRIALS = 10;
 const WARMUPS = 2;
-const REPEATED_OPERATIONS = 512;
-const READ_REPETITIONS = 64;
+const REPEATED_OPERATIONS = 1024;
+const READ_REPETITIONS = 128;
 const DEPENDENCY_COUNT = 8;
 
 export const BENCHMARK_CONFIG = Object.freeze({
@@ -13,6 +13,7 @@ export const BENCHMARK_CONFIG = Object.freeze({
   repeated_operations: REPEATED_OPERATIONS,
   read_repetitions: READ_REPETITIONS,
   dependency_count: DEPENDENCY_COUNT,
+  timer_resolution_policy: "zero-median rows are unresolved and fail result validation",
   p95_method: "nearest-rank sample quantile",
 });
 
@@ -97,6 +98,21 @@ export function summarizeSamples(descriptor, samplesNs) {
     p95_ns: p95Ns,
     median_ns_per_operation: operations > 0 ? medianNs / operations : null,
     median_operations_per_second: operations > 0 ? (operations * 1_000_000_000) / medianNs : null,
+  };
+}
+
+function measurementIntegrity(results) {
+  const zeroMedianRows = results.filter((row) => row.median_ns === 0);
+  const nonFiniteRows = results.filter((row) =>
+    !Number.isFinite(row.median_ns) || !Number.isFinite(row.p95_ns) ||
+    row.samples_ns.some((sample) => !Number.isFinite(sample) || sample < 0));
+  return {
+    total_rows: results.length,
+    valid_rows: results.length - zeroMedianRows.length - nonFiniteRows.length,
+    unresolved_rows: zeroMedianRows.length,
+    zero_median_rows: zeroMedianRows.length,
+    non_finite_rows: nonFiniteRows.length,
+    status: zeroMedianRows.length === 0 && nonFiniteRows.length === 0 ? "pass" : "unresolved",
   };
 }
 
@@ -678,7 +694,7 @@ async function addDirtyCases(results, clock, layerName, directModule, runtimeMod
 
       results.push(await measureCase(
         clock,
-        { ...base, operation: "pending_drain_transfer", setup_operations: size + fanout + fanout + 1, pending_pairs: fanout, timed_operations: fanout, cleanup: "dispose fixture and graph" },
+        { ...base, operation: "pending_drain_transfer", setup_operations: size + fanout + fanout + 1, pending_pairs: fanout, timed_operations: fanout * REPEATED_OPERATIONS, cleanup: "dispose fixture and graph" },
         async () => {
           const layer = await createLayer(layerName, directModule, runtimeModule, wasmModule);
           const state = await buildGraph(layer, size, { computationCount: fanout, fanout });
@@ -686,12 +702,19 @@ async function addDirtyCases(results, clock, layerName, directModule, runtimeMod
           return state;
         },
         (state) => {
-          const pending = state.layer.pending();
-          verifyPendingOrder(state.layer, pending, state.computations);
-          return pendingCount(state.layer, pending);
+          let transferred = 0;
+          for (let iteration = 0; iteration < REPEATED_OPERATIONS; iteration += 1) {
+            const pending = state.layer.pending();
+            verifyPendingOrder(state.layer, pending, state.computations);
+            transferred += pendingCount(state.layer, pending);
+            if (iteration + 1 < REPEATED_OPERATIONS) {
+              check(state.layer.set(state.signals[0].value, iteration + 3001), "pending transfer re-enqueue");
+            }
+          }
+          return transferred;
         },
         disposeState,
-        async (observed) => check(observed === fanout, "pending transfer count"),
+        async (observed) => check(observed === fanout * REPEATED_OPERATIONS, "pending transfer count"),
       ));
 
       results.push(await measureCase(
@@ -909,6 +932,7 @@ export async function runBenchmarks({ directModule, runtimeModule, wasmModule, c
       scheduler_introduced: false,
       all_cases_completed: true,
     },
+    integrity: measurementIntegrity(results),
     results,
   };
 }

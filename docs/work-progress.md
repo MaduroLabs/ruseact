@@ -81,6 +81,10 @@
 - [x] Added structured JSON/Markdown result export, independent correctness
   checks, result-format validation, and a manually dispatched Ubuntu Chromium
   benchmark workflow with artifact upload.
+- [x] Corrected M2.5 Chromium completion and timing measurement: removed
+  virtual-time/DOM-dump completion, added real-time DevTools Protocol polling,
+  browser timer-resolution metadata, calibrated short workloads, and fail-closed
+  result-integrity checks for unresolved rows.
 
 ## In progress / next
 
@@ -93,8 +97,9 @@
   and structured-error contract.
 - [x] Validate browser bundler loading and host integration in M2.4; the
   authoritative GitHub-hosted Chromium job passed for this feature revision.
-- [ ] Complete the authoritative M2.5 Node 24 and Chromium benchmark workflow;
-  record its artifact results in `docs/benchmarks/m2.5-wasm-bridge-baseline.md`.
+- [ ] Complete the corrected authoritative M2.5 Node 24 and Chromium benchmark
+  workflow; record its artifact results in
+  `docs/benchmarks/m2.5-wasm-bridge-baseline.md`.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -191,9 +196,10 @@
   generated `wasm-bindgen --target web` bindings, loaded the actual WASM
   module through `createReactiveCore(loadWasm)`, and passed 94 assertions.
 - M2.5 local Node benchmark diagnostic — PASS on InstaBox with Node `22.23.3`:
-  257 structured result rows across direct WASM and TypeScript layers; the
-  result-format validator passed. The authoritative pinned Node 24 and hosted
-  Chromium results are recorded after the manual benchmark workflow completes.
+  263 structured result rows across direct WASM and TypeScript layers after the
+  timing repair; the integrity and result-format validators passed. The
+  authoritative pinned Node 24 and hosted Chromium results are recorded after
+  the corrected pull-request benchmark workflow completes.
 
 ## Blockers / decisions
 
@@ -235,8 +241,10 @@
   currently passes but is not yet listed in the active develop or main
   required-check rulesets; repository administrators must add it if browser
   verification is intended to gate merges.
-- M2.5 benchmark timing is diagnostic and has no pass/fail threshold. The
-  hosted benchmark workflow is manual and uploads results as artifacts; local
-  Node diagnostics use host Node `22.23.3` when the pinned Node `24.22.3`
-  binary is unavailable. No memory metric or cross-machine speed claim is
-  made.
+- M2.5 benchmark timing has no performance pass/fail threshold, but its
+  integrity gate rejects missing, non-finite, all-zero, or zero-median rows.
+  Browser completion uses real-time DevTools Protocol polling rather than
+  Chromium virtual time or `--dump-dom`. The hosted benchmark workflow uploads
+  results as artifacts; local Node diagnostics use host Node `22.23.3` when the
+  pinned Node `24.22.3` binary is unavailable. No memory metric or
+  cross-machine speed claim is made.

@@ -1,6 +1,8 @@
 import { execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createReadStream, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,6 +92,17 @@ function browserPage(sourceSha, browserVersion) {
     document.body.dataset.testResult = encodeURIComponent(JSON.stringify(value));
   }
 
+  function estimateTimerResolutionNs() {
+    let previous = performance.now();
+    let minimum = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < 10000; index += 1) {
+      const current = performance.now();
+      if (current > previous) minimum = Math.min(minimum, (current - previous) * 1000000);
+      previous = current;
+    }
+    return Number.isFinite(minimum) ? minimum : null;
+  }
+
   async function coldSamples(modulePath, runtimePath, runtimeName) {
     const samples = [];
     const count = BENCHMARK_CONFIG.warmups + BENCHMARK_CONFIG.trials;
@@ -153,9 +166,11 @@ function browserPage(sourceSha, browserVersion) {
         user_agent: navigator.userAgent,
         host: navigator.platform,
         timer: "performance.now() converted to nanoseconds",
-        timer_resolution_note: "browser timer resolution is environment-controlled; small absolute timings are not nanosecond claims",
+        timer_resolution_ns: estimateTimerResolutionNs(),
+        timer_resolution_note: "performance.now() is monotonic, but browser timer resolution is environment-controlled; unresolved zero-median rows fail validation",
         layer: "real Chromium web-module WASM plus compiled packages/ruseact runtime",
         wasm_build: "wasm32-unknown-unknown release with wasm-bindgen --target web",
+        completion: "Chromium DevTools Protocol Runtime.evaluate with a real-time parent timeout",
       },
       precomputed,
     });
@@ -167,26 +182,231 @@ function browserPage(sourceSha, browserVersion) {
 </body></html>`;
 }
 
-function runBrowser(command, args) {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, 180000);
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", (error) => resolve({ error, status: null, stdout, stderr }));
-    child.on("close", (status, signal) => {
-      clearTimeout(timeout);
-      resolve({ error: timedOut ? new Error("browser process timed out") : undefined, status, signal, stdout, stderr });
-    });
+async function allocatePort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
   });
+  const address = server.address();
+  if (address === null || typeof address !== "object") throw new Error("failed to allocate a DevTools port");
+  const port = address.port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+function monotonicNowNs() {
+  return process.hrtime.bigint();
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function devtoolsTargets(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+  if (!response.ok) throw new Error(`DevTools target endpoint returned ${response.status}`);
+  return await response.json();
+}
+
+async function waitForPageTarget(port, expectedUrl, deadlineNs) {
+  let lastError;
+  while (monotonicNowNs() < deadlineNs) {
+    try {
+      const targets = await devtoolsTargets(port);
+      const target = targets.find((entry) => entry.type === "page" && entry.url === expectedUrl);
+      if (target?.webSocketDebuggerUrl !== undefined) return target;
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(100);
+  }
+  throw new Error(`timed out waiting for Chromium DevTools page${lastError === undefined ? "" : `: ${lastError.message}`}`);
+}
+
+class DevToolsClient {
+  constructor(webSocketUrl) {
+    const parsed = new URL(webSocketUrl);
+    this.host = parsed.hostname;
+    this.port = Number(parsed.port);
+    this.path = `${parsed.pathname}${parsed.search}`;
+    this.socket = undefined;
+    this.buffer = Buffer.alloc(0);
+    this.pending = new Map();
+    this.nextId = 1;
+    this.protocolError = undefined;
+  }
+
+  async connect() {
+    this.socket = net.createConnection({ host: this.host, port: this.port });
+    this.socket.on("data", (chunk) => this.receive(chunk));
+    this.socket.on("error", (error) => {
+      this.protocolError = error;
+      for (const pending of this.pending.values()) pending.reject(error);
+      this.pending.clear();
+    });
+    await new Promise((resolve, reject) => {
+      const onConnect = () => {
+        this.socket.off("error", onError);
+        resolve();
+      };
+      const onError = (error) => {
+        this.socket.off("connect", onConnect);
+        reject(error);
+      };
+      this.socket.once("connect", onConnect);
+      this.socket.once("error", onError);
+    });
+    const key = randomBytes(16).toString("base64");
+    this.socket.write(
+      `GET ${this.path} HTTP/1.1\r\nHost: ${this.host}:${this.port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+    );
+    await new Promise((resolve, reject) => {
+      const deadline = setTimeout(() => reject(new Error("timed out during DevTools WebSocket handshake")), 5000);
+      const checkHandshake = () => {
+        const end = this.buffer.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        clearTimeout(deadline);
+        const headers = this.buffer.subarray(0, end).toString("utf8");
+        this.buffer = this.buffer.subarray(end + 4);
+        if (!headers.startsWith("HTTP/1.1 101")) reject(new Error(`DevTools WebSocket handshake failed: ${headers}`));
+        else {
+          this.handshakeCheck = undefined;
+          resolve();
+        }
+      };
+      this.handshakeCheck = checkHandshake;
+      checkHandshake();
+    });
+  }
+
+  receive(chunk) {
+    this.buffer = Buffer.concat([this.buffer, chunk]);
+    if (this.handshakeCheck !== undefined) {
+      this.handshakeCheck();
+      if (this.handshakeCheck !== undefined) return;
+    }
+    while (this.buffer.length >= 2) {
+      const first = this.buffer[0];
+      const second = this.buffer[1];
+      let offset = 2;
+      let length = second & 0x7f;
+      if (length === 126) {
+        if (this.buffer.length < 4) return;
+        length = this.buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (this.buffer.length < 10) return;
+        const largeLength = this.buffer.readBigUInt64BE(2);
+        if (largeLength > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("oversized DevTools frame");
+        length = Number(largeLength);
+        offset = 10;
+      }
+      if (this.buffer.length < offset + length) return;
+      const payload = this.buffer.subarray(offset, offset + length);
+      this.buffer = this.buffer.subarray(offset + length);
+      const opcode = first & 0x0f;
+      if (opcode === 0x1) this.handleMessage(payload.toString("utf8"));
+      else if (opcode === 0x8) this.close();
+      else if (opcode === 0x9) this.sendFrame(0xA, payload);
+    }
+  }
+
+  handleMessage(text) {
+    const message = JSON.parse(text);
+    if (message.id === undefined) return;
+    const pending = this.pending.get(message.id);
+    if (pending === undefined) return;
+    this.pending.delete(message.id);
+    if (message.error !== undefined) pending.reject(new Error(JSON.stringify(message.error)));
+    else pending.resolve(message.result);
+  }
+
+  sendFrame(opcode, payload) {
+    const mask = randomBytes(4);
+    const masked = Buffer.alloc(payload.length);
+    for (let index = 0; index < payload.length; index += 1) masked[index] = payload[index] ^ mask[index % 4];
+    let header;
+    if (payload.length < 126) {
+      header = Buffer.from([0x80 | opcode, 0x80 | payload.length]);
+    } else if (payload.length <= 0xffff) {
+      header = Buffer.alloc(4);
+      header[0] = 0x80 | opcode;
+      header[1] = 0x80 | 126;
+      header.writeUInt16BE(payload.length, 2);
+    } else {
+      header = Buffer.alloc(10);
+      header[0] = 0x80 | opcode;
+      header[1] = 0x80 | 127;
+      header.writeBigUInt64BE(BigInt(payload.length), 2);
+    }
+    this.socket.write(Buffer.concat([header, mask, masked]));
+  }
+
+  send(method, params = {}) {
+    if (this.protocolError !== undefined) return Promise.reject(this.protocolError);
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.sendFrame(0x1, Buffer.from(JSON.stringify({ id, method, params })));
+    });
+  }
+
+  async evaluate(expression) {
+    const result = await this.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+    return result?.result?.value;
+  }
+
+  close() {
+    if (this.socket !== undefined) {
+      this.socket.end();
+      this.socket = undefined;
+    }
+  }
+}
+
+async function stopBrowser(child) {
+  if (child.exitCode !== null) return;
+  child.kill("SIGTERM");
+  await Promise.race([
+    new Promise((resolve) => child.once("close", resolve)),
+    delay(5000).then(() => {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }),
+  ]);
+}
+
+async function runBrowser(command, args, expectedUrl) {
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const deadlineNs = monotonicNowNs() + 180000000000n;
+  let client;
+  try {
+    const port = Number(args.find((argument) => argument.startsWith("--remote-debugging-port="))?.split("=")[1]);
+    const target = await waitForPageTarget(port, expectedUrl, deadlineNs);
+    client = new DevToolsClient(target.webSocketDebuggerUrl);
+    await client.connect();
+    await client.send("Runtime.enable");
+    while (monotonicNowNs() < deadlineNs) {
+      const encoded = await client.evaluate(`JSON.stringify({status: document.body.dataset.status, result: document.body.dataset.testResult || null})`);
+      if (typeof encoded === "string") {
+        const state = JSON.parse(encoded);
+        if (state.status === "passed" || state.status === "failed") {
+          return { status: 0, stdout, stderr, report: state.result === null ? null : JSON.parse(decodeURIComponent(state.result)) };
+        }
+      }
+      await delay(100);
+    }
+    throw new Error("browser benchmark timed out before publishing a result");
+  } finally {
+    client?.close();
+    await stopBrowser(child);
+  }
 }
 
 function renderSummary(report) {
@@ -245,6 +465,8 @@ try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address !== "object") throw new Error("browser benchmark server did not bind");
+  const devtoolsPort = await allocatePort();
+  const benchmarkUrl = `http://127.0.0.1:${address.port}/index.html`;
   const result = await runBrowser(browser.command, [
     "--headless=new",
     "--no-sandbox",
@@ -255,18 +477,14 @@ try {
     "--no-first-run",
     "--no-default-browser-check",
     `--user-data-dir=${path.join(temporaryRoot, "chromium-profile")}`,
-    "--virtual-time-budget=180000",
-    "--dump-dom",
-    `http://127.0.0.1:${address.port}/index.html`,
-  ]);
-  if (result.error !== undefined || result.status !== 0) {
-    throw new Error(`${browser.version} failed with status ${result.status}: ${result.error?.message ?? result.stderr}\nrequests: ${requests.join(", ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    `--remote-debugging-port=${devtoolsPort}`,
+    "--remote-allow-origins=*",
+    benchmarkUrl,
+  ], benchmarkUrl);
+  if (result.report === null || result.report === undefined) {
+    throw new Error(`${browser.version} did not publish a report; requests: ${requests.join(", ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
   }
-  const encodedReport = result.stdout.match(/data-test-result="([^"]+)"/)?.[1];
-  if (encodedReport === undefined) {
-    throw new Error(`browser benchmark did not publish a report\nrequests: ${requests.join(", ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  }
-  const report = JSON.parse(decodeURIComponent(encodedReport));
+  const report = result.report;
   if (report.error !== undefined) throw new Error(`browser benchmark failed: ${report.error}`);
   writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
   writeFileSync(summaryPath, renderSummary(report));

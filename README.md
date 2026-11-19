@@ -43,7 +43,7 @@ API compatibility is claimed.
 | M2.2.1 — Computation identity bridge | Complete |
 | M2.3 — TypeScript runtime bridge | Complete |
 | M2.4 — Browser and WASM integration testing | Implemented; CI verification passed, pending review |
-| M2.5 — WASM bridge performance benchmark | Implemented; hosted benchmark run pending review |
+| M2.5 — WASM bridge performance benchmark | Implemented; corrected hosted measurement verification in progress |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime implemented; M2.4 browser verification is in progress |
 | DOM renderer               | Not implemented |
@@ -175,7 +175,11 @@ operations, dependency metadata, dirty propagation, pending identity transfer,
 explicit batching, initialization, and lifecycle work at 16, 64, and 256
 signals. Direct WASM and public TypeScript rows remain separate because the
 public layer performs handle validation, result normalization, and registry
-work that direct calls do not.
+work that direct calls do not. Browser runs use real Chromium with a DevTools
+Protocol completion signal and real `performance.now()`; virtual-time and
+`--dump-dom` completion are not used for performance measurements. Zero-median
+or non-finite rows fail the benchmark integrity gate rather than being treated
+as zero-cost operations.
 
 Run the manually reproducible Node benchmark after building matching bindings:
 

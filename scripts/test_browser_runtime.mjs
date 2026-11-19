@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createReadStream, cpSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -46,6 +46,51 @@ function contentType(filePath) {
   if (filePath.endsWith(".wasm")) return "application/wasm";
   if (filePath.endsWith(".d.ts")) return "text/plain; charset=utf-8";
   return "application/octet-stream";
+}
+
+function runBrowser(command, args) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, 60000);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        resolve({ error, signal: null, status: null, stderr, stdout });
+      }
+    });
+    child.on("close", (status, signal) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        resolve({
+          error: timedOut ? new Error("browser process timed out") : undefined,
+          signal,
+          status,
+          stderr,
+          stdout,
+        });
+      }
+    });
+  });
 }
 
 function browserPage() {
@@ -281,7 +326,7 @@ try {
   const address = server.address();
   assert(address !== null && typeof address === "object");
   const url = `http://127.0.0.1:${address.port}/index.html`;
-  const result = spawnSync(
+  const result = await runBrowser(
     browser.command,
     [
       "--headless=new",
@@ -297,17 +342,11 @@ try {
       "--dump-dom",
       url,
     ],
-    {
-      encoding: "utf8",
-      timeout: 60000,
-      killSignal: "SIGKILL",
-      maxBuffer: 4 * 1024 * 1024,
-    },
   );
 
   if (result.error !== undefined || result.status !== 0) {
     throw new Error(
-      `${browser.version} failed with status ${result.status}: ${result.error?.message ?? result.stderr}\nrequests: ${requests.join(", ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+      `${browser.version} failed with status ${result.status} and signal ${result.signal}: ${result.error?.message ?? result.stderr}\nrequests: ${requests.join(", ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
   }
   const encodedResult = result.stdout.match(/data-test-result="([^"]+)"/)?.[1];

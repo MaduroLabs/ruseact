@@ -390,10 +390,12 @@ async function addSignalCases(results, clock, layerName, directModule, runtimeMo
       const base = { layer: layerName, size, graph_size: size, value_kind: kind };
       results.push(await measureCase(
         clock,
-        { ...base, operation: "signal_creation", setup_operations: 1, timed_operations: size, cleanup: "dispose created signals and graph" },
+        { ...base, operation: "signal_creation", setup_operations: 1, timed_operations: size * SHORT_OPERATION_REPETITIONS, cleanup: "dispose created signals and graph" },
         async () => ({ layer: await createLayer(layerName, directModule, runtimeModule, wasmModule), created: [], graphLive: true }),
         (state) => {
-          for (let index = 0; index < size; index += 1) state.created.push(state.layer.signal(valueFor(kind, index)));
+          for (let repetition = 0; repetition < SHORT_OPERATION_REPETITIONS; repetition += 1) {
+            for (let index = 0; index < size; index += 1) state.created.push(state.layer.signal(valueFor(kind, repetition * size + index)));
+          }
           return state.created.length;
         },
         async (state) => {
@@ -405,8 +407,8 @@ async function addSignalCases(results, clock, layerName, directModule, runtimeMo
           state.layer.release();
         },
         async (observed, state) => {
-          check(observed === size, "signal creation count");
-          check(mix(state.layer.read(state.created[size - 1])) === mix(valueFor(kind, size - 1)), "created signal value");
+          check(observed === size * SHORT_OPERATION_REPETITIONS, "signal creation count");
+          check(mix(state.layer.read(state.created[state.created.length - 1])) === mix(valueFor(kind, size * SHORT_OPERATION_REPETITIONS - 1)), "created signal value");
         },
       ));
 
@@ -496,10 +498,10 @@ async function addSignalCases(results, clock, layerName, directModule, runtimeMo
 
       results.push(await measureCase(
         clock,
-        { ...base, operation: "signal_disposal", setup_operations: size, timed_operations: size, cleanup: "dispose computations and graph" },
+        { ...base, operation: "signal_disposal", setup_operations: size * SHORT_OPERATION_REPETITIONS, timed_operations: size * SHORT_OPERATION_REPETITIONS, cleanup: "dispose computations and graph" },
         async () => {
           const layer = await createLayer(layerName, directModule, runtimeModule, wasmModule);
-          return await buildGraph(layer, size, { computationCount: 0, connect: false });
+          return await buildGraph(layer, size, { signalCount: size * SHORT_OPERATION_REPETITIONS, computationCount: 0, connect: false, signalKind: kind });
         },
         (state) => {
           for (const signal of state.signals) {
@@ -513,7 +515,7 @@ async function addSignalCases(results, clock, layerName, directModule, runtimeMo
           state.layer.release();
         },
         async (observed, state) => {
-          check(observed === size, "signal disposal count");
+          check(observed === size * SHORT_OPERATION_REPETITIONS, "signal disposal count");
           expectFailure(state.layer.direct ? (() => {
             try {
               state.layer.read(state.signals[0].value);

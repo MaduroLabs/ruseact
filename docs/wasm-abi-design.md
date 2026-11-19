@@ -595,3 +595,39 @@ RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.3-bindgen \
 This proves the Node/WASM integration path. Browser bundler formats, DOM
 integration, workers, automatic dependency tracking, and computation execution
 remain outside M2.3.
+
+## 18. M2.4 browser verification
+
+M2.4 keeps the approved M2.2/M2.2.1 ABI and verifies the M2.3 TypeScript
+runtime with the browser-compatible `wasm-bindgen --target web` output. The
+generated ES module's default asynchronous initializer loads its adjacent
+`ruseact_wasm_bg.wasm` asset. The repository's browser harness copies those
+generated files into a temporary test root, serves them over HTTP with
+`application/wasm` and JavaScript MIME types, and invokes the existing
+`createReactiveCore(loadWasm)` loader. No raw WASM handles or new ABI exports
+are introduced.
+
+The command sequence is:
+
+```bash
+cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+wasm-bindgen target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+  --target web --out-dir target/m2.4-browser-bindgen
+RUSEACT_BROWSER_BINDGEN_OUT="$PWD/target/m2.4-browser-bindgen" \
+  corepack pnpm test:browser
+```
+
+The CI job repeats the sequence on a GitHub-hosted Ubuntu runner with the
+repository's pinned toolchain versions and a real Chromium executable. It is
+the authoritative browser result because this InstaBox cannot deliver
+Chromium's requests to a local HTTP server. The local limitation is not used
+to declare browser success, and no general cross-browser or bundler claim is
+made from Chromium alone.
+
+The browser assertions cover scalar values and equality, unsupported values,
+type mismatches, computation identity registration, dependency operations,
+nested batching, deterministic pending transfer, multiple runtime instances,
+stale/disposed resources, structured errors, and cleanup. The harness reports
+an unknown pending identity as an internal consistency failure and does not
+silently drop it. The existing bridge's documented post-drain consistency
+limitation remains unchanged.

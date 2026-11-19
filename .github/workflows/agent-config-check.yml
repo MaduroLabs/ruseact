@@ -65,6 +65,46 @@ jobs:
       - name: TypeScript checks
         run: pnpm typecheck
 
+  browser:
+    name: Browser (chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install WASM target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install matching wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - name: Verify Chromium
+        run: |
+          BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$BROWSER"
+          "$BROWSER" --version
+      - name: Build release WASM
+        run: cargo build -p ruseact-wasm --target wasm32-unknown-unknown --release --locked
+      - name: Generate browser WASM bindings
+        run: |
+          mkdir -p target/m2.4-browser-bindgen
+          wasm-bindgen \
+            target/wasm32-unknown-unknown/release/ruseact_wasm.wasm \
+            --target web \
+            --out-dir target/m2.4-browser-bindgen
+      - name: Run real Chromium integration
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
+        run: pnpm test:browser
+
   skills:
     name: Skill validation
     runs-on: ubuntu-latest

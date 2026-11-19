@@ -447,3 +447,40 @@ normalization, opaque-handle ownership checks, and pending registry lookup.
 Only equivalent workloads may be compared, and combined overhead is labeled as
 such. Pending transfer continues to use the existing destructive drain; M2.5
 does not add acknowledgement, rollback, or a bulk update protocol.
+
+## Decision 20: M3.1 proposes a DOM renderer boundary without implementing it
+
+M3.1 is a design-only milestone. Its full proposal is in
+[docs/dom-renderer-design.md](dom-renderer-design.md). It does not change the
+M2 RustReactiveCore, WASM ABI, TypeScript runtime, or `packages/ruseact-dom`
+implementation.
+
+The proposal recommends a hybrid rendering model: compiler-assisted static
+DOM templates with fine-grained JavaScript-owned bindings as the primary path,
+and a small explicit runtime descriptor fallback while compiler work remains
+pending. This is a proposed direction requiring human architecture approval,
+not an approved public API or a performance claim.
+
+The current M2 runtime can support only an explicit binding experiment. A
+renderer could create a computation identity, subscribe it to explicitly
+known signals, store the opaque `ComputationHandle` in a JavaScript registry,
+drain pending identities at an explicit flush boundary, and apply a targeted
+DOM operation. The identity is notification metadata; it is not an executable
+callback. M2 still has no computation execution, automatic dependency
+tracking, scheduler, component lifecycle, or DOM mutation API.
+
+The proposed ownership boundary keeps graph values, dependency metadata,
+dirty state, batching, and pending IDs in RustReactiveCore; handle validation
+and transfer in the WASM bridge; public opaque handles and registry resolution
+in TypeScript; and DOM nodes, event callbacks, binding records, root
+ownership, and cleanup in the DOM adapter. Roots borrow containers and shared
+runtime resources by default, own nodes and renderer-created computations,
+and must invalidate bindings before unmount completes so stale pending work
+cannot update detached nodes.
+
+The design explicitly defers approval of view/template descriptors, explicit
+flush semantics, automatic tracking, component identity, conditional and
+keyed-list behavior, attribute/property policy, compiler output versioning,
+external DOM mutation handling, and any future Rust mutation-intent protocol.
+M3.2 must remain limited to the approved subset and must not introduce React
+Fiber, a hidden scheduler, JSX compilation, or speculative runtime changes.

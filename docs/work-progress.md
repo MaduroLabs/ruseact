@@ -2,11 +2,11 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m2.5-wasm-performance`
+- Branch: `feature/m3.1-dom-renderer-design`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `5abd62aa7735442e6d8dfbc40c0758a3b97999f2`
-- Last verified on: Linux x86_64, 2026-11-19 for M2.5 local-supported checks;
-  M1.1–M1.5, M2.1, M2.2, M2.2.1, and M2.3 are merged into this baseline
+- Baseline: `origin/develop` at `ab4158cdbe5356ce90849a681a8c93d360d3d06a`
+- Last verified on: Linux x86_64, 2026-11-19 for M3.1 design pre-flight;
+  M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
 
@@ -90,6 +90,12 @@
   toward the timer-resolution target, with 64 prepared states and a 50 ms
   calibration-sample bound; diagnostic artifacts upload even when
   the integrity gate fails.
+- [x] Inspected the implemented M2 RustReactiveCore, WASM bridge, TypeScript
+  runtime, browser harness, and empty DOM package boundary for M3.1.
+- [x] Drafted the documentation-only M3.1 DOM renderer architecture covering
+  ownership, rendering alternatives, explicit reactive bindings, lifecycle,
+  host operations, compiler/component boundaries, tests, performance, and the
+  separate examples-repository handoff.
 
 ## In progress / next
 
@@ -107,7 +113,10 @@
   263/263 valid workload rows in each report. Artifact `14499858517` was
   created; per-workload numeric values remain artifact-only because its ZIP
   endpoint was unavailable from this InstaBox session.
-- [ ] Design compiler and DOM renderer milestones; do not add them to M0.
+- [ ] Obtain human approval for the M3.1 hybrid renderer direction and open
+  decisions before starting M3.2 implementation.
+- [ ] Implement only the approved M3.2 DOM host and explicit binding subset;
+  do not add computation execution, automatic tracking, or a scheduler here.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -213,6 +222,13 @@
   Browser jobs passed; Node and Chromium each produced 263/263 valid rows with
   no unresolved, zero-median, zero-sample, non-finite, or calibration-limit
   rows. Artifact `14499858517` was uploaded.
+- M3.1 design-only validation — PASS on Linux x86_64: Rust formatting, Clippy,
+  workspace tests (35 core and 10 WASM tests), the wasm32 workspace check,
+  TypeScript typecheck, diff checks, skill validation, workflow policy, and
+  automation-gate checks. The optimized WASM build, matching
+  `wasm-bindgen-cli 0.2.130` Node bindings, and existing real Node/WASM
+  TypeScript integration test also passed. No local Chromium result is claimed;
+  the existing hosted Ubuntu browser job remains authoritative.
 
 ## Blockers / decisions
 
@@ -262,3 +278,7 @@
   results as artifacts; local Node diagnostics use host Node `22.23.3` when the
   pinned Node `24.22.3` binary is unavailable. No memory metric or
   cross-machine speed claim is made.
+- M3.1 is design-only. The proposed hybrid DOM architecture requires human
+  approval before M3.2. No runtime source, WASM ABI, public TypeScript API,
+  compiler, scheduler, DOM operation, or example application is added by this
+  milestone.

@@ -594,12 +594,13 @@ async function addDependencyCases(results, clock, layerName, directModule, runti
     await disposeState(connected);
 
     for (const operation of ["subscription_registration", "duplicate_subscription", "unsubscription"]) {
+      const edgeRepetitionCount = SHORT_OPERATION_REPETITIONS;
       results.push(await measureCase(
         clock,
-        { ...base, operation, dependency_edges: size, computation_count: computationCount, timed_operations: size, cleanup: "dispose fixture and graph" },
+        { ...base, operation, dependency_edges: size * edgeRepetitionCount, computation_count: computationCount * edgeRepetitionCount, timed_operations: size * edgeRepetitionCount, cleanup: "dispose fixture and graph" },
         async () => {
           const layer = await createLayer(layerName, directModule, runtimeModule, wasmModule);
-          return await buildGraph(layer, size, { computationCount, degree: 4, connect: operation !== "subscription_registration" });
+          return await buildGraph(layer, size, { signalCount: size * edgeRepetitionCount, computationCount: computationCount * edgeRepetitionCount, degree: 4, connect: operation !== "subscription_registration" });
         },
         (state) => {
           let changed = 0;
@@ -614,7 +615,7 @@ async function addDependencyCases(results, clock, layerName, directModule, runti
           return changed;
         },
         disposeState,
-        async (observed) => check(observed === (operation === "duplicate_subscription" ? 0 : size), `${operation} result count`),
+        async (observed) => check(observed === (operation === "duplicate_subscription" ? 0 : size * edgeRepetitionCount), `${operation} result count`),
       ));
     }
 

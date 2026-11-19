@@ -42,7 +42,7 @@ API compatibility is claimed.
 | M2.2 — Rust WASM exports | Complete |
 | M2.2.1 — Computation identity bridge | Complete |
 | M2.3 — TypeScript runtime bridge | Complete |
-| M2.4 — Browser and WASM integration testing | In progress; authoritative browser verification runs in GitHub Actions |
+| M2.4 — Browser and WASM integration testing | Implemented; CI verification passed, pending review |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime implemented; M2.4 browser verification is in progress |
 | DOM renderer               | Not implemented |
@@ -153,6 +153,11 @@ HTTP server, so an unsuccessful local browser launch is not reported as a
 browser pass or a runtime failure. The repository currently claims only the
 tested Chromium configuration; it does not claim broad cross-browser or
 bundler compatibility.
+
+The hosted verification run `44426020307` passed with Google Chrome
+`157.0.8103.50` and 94 browser assertions. Repository administrators must add
+the `Browser (chromium)` context to the protected-branch required-check lists
+if browser verification is to gate merges; this PR does not modify rulesets.
 
 After a successful browser CI run, the branch remains subject to normal manual
 review and protected-branch workflow. M2.5 will define performance

@@ -84,8 +84,8 @@
   safe pending-computation handle mapping.
 - [x] Build the M2.3 public TypeScript wrapper; preserve the M2.2 opaque-handle
   and structured-error contract.
-- [ ] Validate browser bundler loading and host integration in M2.4; the
-  authoritative Chromium job runs after the feature PR is published.
+- [x] Validate browser bundler loading and host integration in M2.4; the
+  authoritative GitHub-hosted Chromium job passed for this feature revision.
 - [ ] Design compiler and DOM renderer milestones; do not add them to M0.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
@@ -177,6 +177,10 @@
   browser harness syntax, web-bindings preparation, Rust checks, TypeScript
   checks, Node/WASM regression path, and policy checks are run locally; real
   browser assertions are authoritative only on the GitHub-hosted Ubuntu job.
+- M2.4 hosted browser validation — PASS: GitHub Actions run `44426020307`,
+  `Browser (chromium)`, used Google Chrome `157.0.8103.50` on Ubuntu 26.04.1,
+  generated `wasm-bindgen --target web` bindings, loaded the actual WASM
+  module through `createReactiveCore(loadWasm)`, and passed 94 assertions.
 
 ## Blockers / decisions
 
@@ -212,8 +216,9 @@
   the underlying M2.2 drain remains destructive before its bridge-registry
   consistency check. No unapproved rollback or acknowledgement protocol was
   introduced in M2.3.
-- M2.4 cannot complete its browser acceptance criteria from this InstaBox
-  because Chromium cannot reach local HTTP servers. The GitHub-hosted
-  `Browser (chromium)` job is the required execution environment; its actual
-  Chromium version and assertion count must be recorded from the CI result
-  before claiming browser verification.
+- M2.4 local browser execution remains unavailable because this InstaBox
+  Chromium cannot reach local HTTP servers. The hosted Ubuntu job is therefore
+  the authoritative execution environment. The `Browser (chromium)` context
+  currently passes but is not yet listed in the active develop or main
+  required-check rulesets; repository administrators must add it if browser
+  verification is intended to gate merges.

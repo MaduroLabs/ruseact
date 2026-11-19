@@ -208,6 +208,29 @@ function browserPage() {
           "external ancestor removal is detected",
         );
 
+        const fragment = document.createDocumentFragment();
+        context.claimContainer(fragment);
+        const fragmentElement = context.createElement("article");
+        const fragmentText = context.createTextNode("fragment boundary");
+        context.appendChild(fragment, fragmentElement);
+        context.appendChild(fragmentElement, fragmentText);
+        check(fragmentElement.parentNode === fragment, "claimed DocumentFragment accepts owned nodes");
+        check(context.setText(fragmentText, "fragment updated"), "fragment descendant remains valid");
+        check(context.setAttribute(fragmentElement, "data-fragment", "yes"), "fragment descendant accepts attributes");
+
+        const unmanagedParent = document.createElement("div");
+        document.body.appendChild(unmanagedParent);
+        const movedToUnmanaged = context.createElement("div");
+        context.appendChild(root, movedToUnmanaged);
+        unmanagedParent.appendChild(movedToUnmanaged);
+        expectError(
+          () => context.setAttribute(movedToUnmanaged, "data-invalid", "yes"),
+          "detached_node",
+          "node moved to an unmanaged subtree is rejected",
+        );
+        unmanagedParent.removeChild(movedToUnmanaged);
+        unmanagedParent.remove();
+
         const button = context.createElement("button");
         context.appendChild(root, button);
         let clicks = 0;

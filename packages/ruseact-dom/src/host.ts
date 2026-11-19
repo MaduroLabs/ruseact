@@ -242,26 +242,31 @@ export function createHostContext(document: Document): HostContext {
 
     if (record.kind === "created" && record.inserted) {
       let top = node;
-      while (top.parentNode !== null) {
-        const parentRecord = NODE_OWNERS.get(top.parentNode);
+      while (true) {
+        const topRecord = NODE_OWNERS.get(top);
+        if (topRecord?.context === context && topRecord.kind === "container") {
+          break;
+        }
+
+        const parent = top.parentNode;
+        if (parent === null) {
+          markDetachedSubtree(top, context);
+          throw hostError(
+            "detached_node",
+            operation,
+            "created node is no longer inside a claimed host container",
+          );
+        }
+        const parentRecord = NODE_OWNERS.get(parent);
         if (parentRecord?.context !== context) {
-          markDetachedSubtree(node, context);
+          markDetachedSubtree(top, context);
           throw hostError(
             "detached_node",
             operation,
             "created node is no longer inside its owning host context",
           );
         }
-        top = top.parentNode;
-      }
-      const topRecord = NODE_OWNERS.get(top);
-      if (topRecord?.context === context && topRecord.kind === "created" && topRecord.inserted) {
-        markDetachedSubtree(top, context);
-        throw hostError(
-          "detached_node",
-          operation,
-          "created node is no longer inside its owning host context",
-        );
+        top = parent;
       }
     }
     return record;

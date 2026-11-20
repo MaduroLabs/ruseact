@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `fix/m2.5-browser-benchmark-flakiness`
+- Branch: `feature/m3.3-reactive-dom-bindings`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `99fdb406b07cc50cdf0e8f056818b71aa6db7eaa`
-- Last verified on: Linux x86_64, 2026-11-20 for M2.5 calibration maintenance;
+- Baseline: `origin/develop` at `20ac8a1af817d8596ad9f070f60aa34d4901c642`
+- Last verified on: Linux x86_64, 2026-11-20 for M3.3 binding integration;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
@@ -109,6 +109,13 @@
   explicit cleanup without a public renderer API.
 - [x] Added the real Chromium M3.2 host test command and preserved the existing
   M2 browser/WASM integration command in the hosted CI job.
+- [x] Implemented the internal M3.3 binding context with explicit dependency
+  registration, legitimate computation-handle mapping, initial JavaScript
+  updates, one-pass FIFO flush, reentrancy rejection, and deterministic
+  binding/context cleanup.
+- [x] Added the real-WASM Chromium binding harness for text, attribute,
+  property, batching, ordering, write-during-flush, disposal, foreign-instance,
+  detached-target, and unknown-pending behavior.
 
 ## In progress / next
 
@@ -128,9 +135,11 @@
   endpoint was unavailable from this InstaBox session.
 - [x] Obtain human approval for the M3.1 hybrid renderer direction and open
   decisions before starting M3.2 implementation.
-- [ ] Add the M3.3 explicit reactive-binding execution only after its public
-  view, root, flush, and lifecycle contracts receive approval; do not add
-  automatic tracking or a scheduler in M3.2.
+- [x] Implement the approved internal M3.3 explicit reactive-binding prototype
+  without finalizing public view, root, or lifecycle APIs; do not add automatic
+  tracking or a scheduler.
+- [ ] Define the separately approved public renderer/view lifecycle and M3.4
+  integration boundaries; shared-runtime binding managers remain unsupported.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -251,6 +260,15 @@
   operation lock is on a read-only filesystem; no dependency or lockfile
   change was made. The new real Chromium DOM test remains authoritative in
   hosted CI.
+- M3.3 local validation — PASS for Rust formatting, Clippy, workspace tests,
+  wasm32 workspace check, TypeScript typecheck, binding/browser-harness strict
+  compilation and syntax, synthetic binding lifecycle sanity, optimized
+  release WASM build, matching `wasm-bindgen-cli 0.2.130`, existing Node/WASM
+  bridge and runtime tests, README validation, skill validation, workflow
+  policy, automation gate, and risk classification. The required frozen pnpm
+  install was blocked by the known read-only InstaBox pnpm store lock; no
+  dependency or lockfile change was made. Hosted Chromium binding validation
+  is authoritative and pending the feature PR workflow.
 
 ## Blockers / decisions
 
@@ -305,5 +323,9 @@
   compiler, scheduler, DOM operation, or example application is added by this
   milestone.
 - M3.2 deliberately keeps host operations internal. The public root lifecycle,
-  reactive binding execution, component identity, view descriptors, and flush
-  semantics remain deferred to M3.3 or a separately approved milestone.
+  component identity, view descriptors, and public flush lifecycle remain
+  deferred. M3.3 adds only the approved internal explicit binding context.
+- M3.3 requires one dedicated ReactiveCore per active binding context because
+  the existing pending drain is global and destructive. Unknown pending
+  computations fail closed, but the current ABI cannot restore a consumed
+  snapshot; scoped draining and rollback remain future decisions.

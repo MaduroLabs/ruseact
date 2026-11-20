@@ -7,10 +7,12 @@ const DEPENDENCY_COUNT = 8;
 const SHORT_OPERATION_REPETITIONS = 64;
 const TRANSFER_REPETITIONS = 64;
 const WARM_INSTANCE_REPETITIONS = 256;
-const CALIBRATION_MIN_DURATION_NS = 100_000;
-const CALIBRATION_RESOLUTION_MULTIPLIER = 8;
+const CALIBRATION_MIN_DURATION_NS = 2_000_000;
+const CALIBRATION_RESOLUTION_MULTIPLIER = 16;
 const CALIBRATION_MAX_BATCHES = 64;
 const CALIBRATION_MAX_SAMPLE_NS = 50_000_000;
+const CALIBRATION_MAX_ATTEMPTS = 3;
+const CALIBRATION_RETRY_MULTIPLIER = 2;
 
 export const BENCHMARK_CONFIG = Object.freeze({
   schema_version: 1,
@@ -27,7 +29,9 @@ export const BENCHMARK_CONFIG = Object.freeze({
   calibration_resolution_multiplier: CALIBRATION_RESOLUTION_MULTIPLIER,
   calibration_max_batches: CALIBRATION_MAX_BATCHES,
   calibration_max_sample_ns: CALIBRATION_MAX_SAMPLE_NS,
-  timer_resolution_policy: "zero-median, non-finite, or calibration-limit rows are unresolved and fail validation",
+  calibration_max_attempts: CALIBRATION_MAX_ATTEMPTS,
+  calibration_retry_multiplier: CALIBRATION_RETRY_MULTIPLIER,
+  timer_resolution_policy: "official zero or non-finite samples trigger bounded whole-attempt recalibration; final zero-median, zero-sample, non-finite, or calibration-limit rows are unresolved and fail validation",
   p95_method: "nearest-rank sample quantile",
 });
 
@@ -116,6 +120,9 @@ export function summarizeSamples(descriptor, samplesNs) {
     calibration_batches: descriptor.calibration_batches ?? 1,
     calibration_target_ns: descriptor.calibration_target_ns ?? null,
     calibration_samples_ns: descriptor.calibration_samples_ns ?? [],
+    calibration_attempts: descriptor.calibration_attempts ?? [],
+    measurement_attempts: descriptor.measurement_attempts ?? [],
+    recalibration_count: descriptor.recalibration_count ?? 0,
     calibration_limit_reached: descriptor.calibration_limit_reached ?? false,
     unresolved_reason: descriptor.unresolved_reason ?? null,
   };
@@ -130,6 +137,7 @@ function measurementIntegrity(results) {
   const unresolvedRows = results.filter((row) => row.unresolved_reason !== null);
   const unresolvedSet = new Set([...zeroMedianRows, ...zeroSampleRows, ...unresolvedRows]);
   const invalidSet = new Set([...zeroMedianRows, ...zeroSampleRows, ...nonFiniteRows, ...unresolvedRows]);
+  const recalibratedRows = results.filter((row) => row.recalibration_count > 0);
   return {
     total_rows: results.length,
     valid_rows: results.length - invalidSet.size,
@@ -138,6 +146,7 @@ function measurementIntegrity(results) {
     zero_sample_rows: zeroSampleRows.length,
     non_finite_rows: nonFiniteRows.length,
     calibration_limit_rows: unresolvedRows.length,
+    recalibrated_rows: recalibratedRows.length,
     status: invalidSet.size === 0 ? "pass" : "unresolved",
   };
 }
@@ -184,15 +193,15 @@ async function executeBatch(clock, setup, operation, cleanup, validate, batchCou
   return elapsedNs;
 }
 
-function calibrationTargetNs(clock) {
+export function calibrationTargetNs(clock) {
   const resolutionNs = clock.resolutionNs ?? CALIBRATION_MIN_DURATION_NS;
   return Math.max(CALIBRATION_MIN_DURATION_NS, resolutionNs * CALIBRATION_RESOLUTION_MULTIPLIER);
 }
 
-async function calibrateCase(clock, setup, operation, cleanup, validate) {
+export async function calibrateCase(clock, setup, operation, cleanup, validate, minimumBatchCount = 1) {
   const targetNs = calibrationTargetNs(clock);
   const samplesNs = [];
-  let batchCount = 1;
+  let batchCount = Math.min(CALIBRATION_MAX_BATCHES, Math.max(1, minimumBatchCount));
   let elapsedNs = 0;
   while (true) {
     elapsedNs = await executeBatch(clock, setup, operation, cleanup, validate, batchCount);
@@ -211,28 +220,96 @@ async function calibrateCase(clock, setup, operation, cleanup, validate) {
   };
 }
 
-async function measureCase(clock, descriptor, setup, operation, cleanup, validate) {
-  const calibration = await calibrateCase(clock, setup, operation, cleanup, validate);
+function measurementFailureReason(calibration, samplesNs, attempts) {
+  if (calibration.limitReached) return "calibration_limit_reached_below_target";
+  if (samplesNs.some((sample) => !Number.isFinite(sample))) {
+    return attempts >= CALIBRATION_MAX_ATTEMPTS
+      ? "non_finite_sample_after_recalibration_limit"
+      : "non_finite_sample_requires_recalibration";
+  }
+  if (samplesNs.some((sample) => sample === 0)) {
+    return attempts >= CALIBRATION_MAX_ATTEMPTS
+      ? "zero_sample_after_recalibration_limit"
+      : "zero_sample_requires_recalibration";
+  }
+  return null;
+}
+
+export async function measureCase(clock, descriptor, setup, operation, cleanup, validate) {
+  const baseTimedOperations = descriptor.timed_operations;
+  const measurementAttempts = [];
+  let minimumBatchCount = 1;
+  let finalCalibration;
+  let finalSamplesNs;
+  let unresolvedReason = null;
+
+  for (let attempt = 1; attempt <= CALIBRATION_MAX_ATTEMPTS; attempt += 1) {
+    const calibration = await calibrateCase(
+      clock,
+      setup,
+      operation,
+      cleanup,
+      validate,
+      minimumBatchCount,
+    );
+    const timedOperations = baseTimedOperations * calibration.batchCount;
+
+    for (let trial = 0; trial < WARMUPS; trial += 1) {
+      await executeBatch(clock, setup, operation, cleanup, validate, calibration.batchCount);
+    }
+
+    const samplesNs = [];
+    for (let trial = 0; trial < TRIALS; trial += 1) {
+      samplesNs.push(await executeBatch(clock, setup, operation, cleanup, validate, calibration.batchCount));
+    }
+
+    const failureReason = measurementFailureReason(calibration, samplesNs, attempt);
+    measurementAttempts.push({
+      attempt,
+      calibration_batches: calibration.batchCount,
+      timed_operations: timedOperations,
+      calibration_target_ns: calibration.targetNs,
+      calibration_samples_ns: calibration.samplesNs,
+      calibration_limit_reached: calibration.limitReached,
+      samples_ns: samplesNs,
+      status: failureReason === null ? "accepted" : "recalibrate",
+      failure_reason: failureReason,
+    });
+    finalCalibration = calibration;
+    finalSamplesNs = samplesNs;
+    unresolvedReason = failureReason;
+
+    if (failureReason === null) break;
+    if (attempt === CALIBRATION_MAX_ATTEMPTS) break;
+
+    const largerBatch = calibration.batchCount * CALIBRATION_RETRY_MULTIPLIER;
+    if (largerBatch <= calibration.batchCount) break;
+    minimumBatchCount = Math.min(CALIBRATION_MAX_BATCHES, largerBatch);
+  }
+
   const timedDescriptor = {
     ...descriptor,
-    base_timed_operations: descriptor.timed_operations,
-    timed_operations: descriptor.timed_operations * calibration.batchCount,
-    calibration_batches: calibration.batchCount,
-    calibration_target_ns: calibration.targetNs,
-    calibration_samples_ns: calibration.samplesNs,
-    calibration_limit_reached: calibration.limitReached,
-    unresolved_reason: calibration.limitReached ? "calibration_limit_reached_below_target" : null,
+    base_timed_operations: baseTimedOperations,
+    timed_operations: baseTimedOperations * finalCalibration.batchCount,
+    calibration_batches: finalCalibration.batchCount,
+    calibration_target_ns: finalCalibration.targetNs,
+    calibration_samples_ns: finalCalibration.samplesNs,
+    calibration_limit_reached: finalCalibration.limitReached,
+    calibration_attempts: measurementAttempts.map((attempt) => ({
+      attempt: attempt.attempt,
+      calibration_batches: attempt.calibration_batches,
+      timed_operations: attempt.timed_operations,
+      calibration_target_ns: attempt.calibration_target_ns,
+      calibration_samples_ns: attempt.calibration_samples_ns,
+      calibration_limit_reached: attempt.calibration_limit_reached,
+    })),
+    measurement_attempts: measurementAttempts,
+    recalibration_count: measurementAttempts.length - 1,
+    unresolved_reason: unresolvedReason === null || unresolvedReason === "zero_sample_requires_recalibration" || unresolvedReason === "non_finite_sample_requires_recalibration"
+      ? null
+      : unresolvedReason,
   };
-
-  for (let trial = 0; trial < WARMUPS; trial += 1) {
-    await executeBatch(clock, setup, operation, cleanup, validate, calibration.batchCount);
-  }
-
-  const samplesNs = [];
-  for (let trial = 0; trial < TRIALS; trial += 1) {
-    samplesNs.push(await executeBatch(clock, setup, operation, cleanup, validate, calibration.batchCount));
-  }
-  return summarizeSamples(timedDescriptor, samplesNs);
+  return summarizeSamples(timedDescriptor, finalSamplesNs);
 }
 
 function directLayer(moduleValue) {

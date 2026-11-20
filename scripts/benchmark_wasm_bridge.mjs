@@ -94,7 +94,7 @@ function renderSummary(report) {
     `Source SHA: \`${report.metadata.source_sha}\``,
     `Node: ${report.metadata.node_version}`,
     `Trials: ${report.configuration.trials}; warmups: ${report.configuration.warmups}`,
-    `Integrity: ${report.integrity.status}; valid rows: ${report.integrity.valid_rows}; unresolved rows: ${report.integrity.unresolved_rows}; zero-sample rows: ${report.integrity.zero_sample_rows}`,
+    `Integrity: ${report.integrity.status}; valid rows: ${report.integrity.valid_rows}; unresolved rows: ${report.integrity.unresolved_rows}; zero-sample rows: ${report.integrity.zero_sample_rows}; recalibrated rows: ${report.integrity.recalibrated_rows}`,
     `Timer resolution estimate: ${report.metadata.timer_resolution_ns ?? "unavailable"} ns`,
     "",
     "| Layer | Operation | Size | Kind | Batches | Timed ops | Median ns | p95 ns | ns/op | ops/s |",

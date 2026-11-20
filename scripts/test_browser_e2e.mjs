@@ -193,7 +193,7 @@ function browserPage() {
           deferredValueNode = scope.createTextNode("");
           button = scope.createElement("button");
           input = scope.createElement("input");
-          button.textContent = "increment";
+          scope.appendChild(button, scope.createTextNode("increment"));
           scope.appendChild(section, text);
           scope.appendChild(section, mirror);
           scope.appendChild(section, orderA);

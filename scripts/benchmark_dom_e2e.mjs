@@ -90,6 +90,7 @@ function browserPage(sourceSha, browserVersion, toolchain) {
 
   const sourceSha = ${JSON.stringify(sourceSha)};
   const browserVersion = ${JSON.stringify(browserVersion)};
+  const toolchain = ${JSON.stringify(toolchain)};
 
   function publish(value) {
     document.body.dataset.status = value.error === undefined ? "passed" : "failed";

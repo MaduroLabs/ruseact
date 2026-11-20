@@ -136,7 +136,8 @@ The following capabilities are required before a useful renderer exists:
    updates and keyed list changes.
 
 M3.1 does not fill these gaps in runtime code. It specifies contracts and
-  the implementation boundary for M3.2.
+  the implementation boundaries for the later M3.2 host and M3.3 binding
+  milestones.
 
 ## 4. Responsibility boundaries
 
@@ -835,8 +836,9 @@ The following decisions are intentionally unresolved:
 10. Decide whether any future Rust mutation-intent protocol is justified by
     measured end-to-end workloads.
 
-Until these are approved, no M3.2 implementation should change M2 runtime
-semantics or add public DOM APIs.
+These decisions remain unresolved for the public renderer. The approved M3.3
+prototype does not change M2 runtime semantics or add public DOM APIs; it is
+limited to an internal explicit binding context and one requested flush pass.
 
 ## 18. Proposed M3.2 implementation boundaries
 
@@ -888,11 +890,50 @@ detachment, ordering, properties, event dispatch/cleanup, disposal, and
 preservation of unrelated nodes. Local InstaBox Chromium is not authoritative
 because of its documented loopback HTTP limitation.
 
-M3.3 can build on this host boundary for explicit reactive binding execution
-only after the public view descriptor, root ownership, flush semantics, and
-binding lifecycle decisions are approved. M3.2 does not make those decisions.
+M3.3 builds on this host boundary for the approved internal explicit reactive
+binding execution only. The public view descriptor, root ownership, public
+flush semantics, and component lifecycle decisions remain unresolved; M3.2
+and M3.3 do not make those decisions.
 
-## 20. Summary
+## 20. M3.3 explicit binding implementation note
+
+M3.3 implements the narrow explicit binding model described above in the
+internal `packages/ruseact-dom/src/bindings.ts` module. Its factory borrows a
+`ReactiveCore` and M3.2 `HostContext`, and one active binding context is
+allowed per dedicated runtime. The module is not re-exported from
+`packages/ruseact-dom/src/index.ts`; no public root or view descriptor is
+approved by this implementation.
+
+Each registration creates a real opaque `ComputationHandle`, replaces an
+explicit dependency list through the existing runtime, validates the target,
+executes a JavaScript-owned update function once, and records the binding in a
+private map keyed by the computation object. A registration failure cleans up
+the computation and subscriptions. The update function must return a valid
+`CoreResult`; it is not a Rust computation callback and dependencies are not
+inferred from `get()` calls.
+
+The explicit `flush()` operation drains the runtime once, validates the whole
+pending handle snapshot, resolves it in FIFO order, and executes live binding
+updates once each. Reentrant flush calls are rejected. Updates that write
+signals can create pending work for a later flush, but never trigger a
+recursive drain. Binding and context disposal unsubscribe and dispose only
+renderer-created computations; borrowed signals, runtime, host context, and
+DOM nodes remain alive.
+
+The runtime's pending queue is global and destructive. An unknown pending
+computation therefore fails closed with progress metadata, but the existing
+ABI cannot restore the consumed snapshot. This is why the MVP requires a
+dedicated runtime and does not support multiple independent binding managers
+sharing one runtime. A scoped drain or rollback protocol is deferred to a
+future ABI decision.
+
+The hosted browser binding harness verifies initial and targeted text,
+attribute, and property updates, explicit dependencies, FIFO ordering,
+deduplication, batching, write-during-flush behavior, reentrancy, failed
+registration cleanup, binding/context disposal, foreign instances, detached
+targets, unknown pending work, and preservation of borrowed resources.
+
+## 21. Summary
 
 M2 supplies a deterministic reactive invalidation substrate, not a renderer.
 The safest first DOM architecture is therefore an explicitly owned

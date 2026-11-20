@@ -38,6 +38,7 @@ interface HostState {
  */
 export interface HostContext {
   claimContainer(container: Element | DocumentFragment): void;
+  assertOwned(node: Node): void;
   createElement(name: string, namespace?: string): Element;
   createTextNode(text: string): Text;
   insertBefore(parent: Node, child: Node, anchor?: Node | null): void;
@@ -314,6 +315,10 @@ export function createHostContext(document: Document): HostContext {
       return;
     }
     registerNode(container, "container", false);
+  }
+
+  function assertOwned(node: Node): void {
+    owned(node, "assert_owned");
   }
 
   function createElement(name: string, namespace?: string): Element {
@@ -654,6 +659,7 @@ export function createHostContext(document: Document): HostContext {
 
   context = {
     claimContainer,
+    assertOwned,
     createElement,
     createTextNode,
     insertBefore,

@@ -534,3 +534,47 @@ execution, JSX compiler, or renderer-root lifecycle. Real DOM correctness is
 verified by the separate hosted Chromium test command. M3.3 may consume this
 internal host boundary when the public root and reactive-binding contracts
 receive explicit approval.
+
+## Decision 22: M3.3 implements an internal explicit binding prototype
+
+M3.3 implements the narrow approved connection between the existing reactive
+runtime and the M3.2 host. It does not change RustReactiveCore, the WASM ABI,
+the public `ReactiveCore` interface, or the package entry point.
+
+`packages/ruseact-dom/src/bindings.ts` provides the internal
+`createBindingContext(host, runtime)` factory. A binding context borrows one
+dedicated `ReactiveCore`, one `HostContext`, application-owned signals, and
+DOM nodes. It owns only the computation handles and dependency subscriptions
+created for its binding records. A module-private runtime ownership map rejects
+two active binding contexts for the same runtime.
+
+Registration creates a legitimate computation through `runtime`, replaces its
+explicit dependency list atomically, validates the target through the host,
+executes the JavaScript-owned update function once, and records the binding by
+the opaque `ComputationHandle`. A failed initial update rolls back dependency
+subscriptions and the computation. The update function must return a valid
+`CoreResult`; it may read signals explicitly and call targeted host operations,
+but Rust never receives or executes the JavaScript callback.
+
+`flush()` invokes the existing destructive runtime drain once. It validates the
+whole pending snapshot before executing it, resolves each handle through the
+private map, and executes live bindings in the FIFO order supplied by Rust.
+Reentrant flush, registration during flush, and context disposal during flush
+are rejected. A signal write made by an update is not drained recursively and
+therefore requires a later explicit flush. The report intentionally states
+that pending work after the pass was not inspected because M2 exposes no
+non-destructive pending-count operation.
+
+An unknown pending handle fails closed with progress metadata rather than being
+silently ignored. Because the existing global drain can consume work owned by
+another computation before this check, the MVP requires a dedicated runtime
+and does not claim safe shared-runtime renderer support. This limitation is
+documented rather than repaired through a new scoped-drain ABI.
+
+Binding disposal marks the record inactive before unsubscribing dependencies
+and disposing its computation. Context disposal repeats that cleanup for every
+record, releases its runtime ownership marker, and leaves the borrowed runtime,
+signals, host context, and DOM nodes alive. A detached target is rejected by
+the host ownership boundary and its binding is cleaned up before the flush
+reports the failure. No scheduler, automatic dependency tracking, component
+execution, compiler, public root API, or virtual DOM is introduced.

@@ -23,8 +23,8 @@ Ruseact explores a different separation of responsibilities:
 - **Rust:** Reactive graph, signal identity, dependency management, and future
   scheduling.
 - **TypeScript/JavaScript:** Component execution and browser-facing integration.
-- **DOM adapter:** The M3.1 renderer architecture is documented; browser
-  rendering and event handling remain unimplemented.
+- **DOM adapter:** Internal M3.2 host operations and the M3.3 explicit binding
+  prototype are implemented; public rendering lifecycle remains deferred.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -45,11 +45,12 @@ API compatibility is claimed.
 | M2.3 — TypeScript runtime bridge | Complete |
 | M2.4 — Browser and WASM integration testing | Complete; hosted CI verification passed |
 | M2.5 — WASM bridge performance benchmark | Complete; hosted measurement integrity passed |
-| M3.1 — DOM renderer architecture design | Design drafted; pending human architecture review |
-| M3.2 — DOM host operations | Internal host adapter implemented; hosted browser validation pending |
+| M3.1 — DOM renderer architecture design | Complete; public renderer decisions remain deferred |
+| M3.2 — DOM host operations | Complete; hosted Chromium validation passed |
+| M3.3 — Reactive DOM bindings | Internal explicit binding prototype complete; no public renderer API |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
-| DOM renderer               | M3.1 design approved; M3.2 internal host operations in progress |
+| DOM renderer               | M3.1 design approved; M3.2 host and M3.3 binding internals complete |
 | Compiler integration       | Not implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
@@ -92,13 +93,20 @@ The Rust reactive core supports:
   updates, narrow `value`/`checked`/`disabled` property writes, native event
   listener lifecycle, ownership validation, and explicit cleanup. The host
   context is not exported from the package entry point.
+- An internal M3.3 binding context in `packages/ruseact-dom/src/bindings.ts`
+  that creates legitimate runtime computations, registers explicit signal
+  dependencies, performs initial JavaScript-owned updates, resolves pending
+  computation handles in FIFO order, and performs one explicit flush pass.
+  It borrows the runtime, signals, and host context; it does not add a second
+  reactive graph or dispose borrowed resources.
 - A test-only M2.5 benchmark harness that separates direct generated WASM
   calls, public TypeScript runtime calls, and real Chromium execution. It
   records deterministic 16/64/256-signal workloads, raw samples, summaries,
   correctness checks, and structured artifacts without changing runtime APIs.
 
-Computation execution, automatic dependency tracking, and scheduling are not
-yet implemented. The DOM renderer, compiler, browser bundler matrix, and
+Rust computation execution, automatic dependency tracking, and scheduling are
+not implemented. M3.3 executes explicitly registered JavaScript update
+functions only. The public DOM renderer, compiler, browser bundler matrix, and
 worker handle transfer are also not implemented.
 
 M3.1 documents a proposed DOM renderer architecture in
@@ -151,8 +159,37 @@ DOM, and a public root lifecycle are not implemented.
 The browser test command is `corepack pnpm test:browser:dom`. It uses the
 existing hosted Chromium job; the InstaBox environment is not treated as an
 authoritative local browser environment because it cannot reliably reach its
-own temporary HTTP server. Reactive bindings, computation execution, and the
-public root/flush lifecycle remain deferred to M3.3 and later approved work.
+own temporary HTTP server. Reactive bindings and computation execution remain
+internal M3.3 functionality; the public root/flush lifecycle remains deferred.
+
+## M3.3 internal reactive DOM bindings
+
+M3.3 adds `createBindingContext(host, runtime)` in the internal
+`packages/ruseact-dom/src/bindings.ts` module. The package entry point remains
+empty, so this is not a public renderer API. A binding creates one legitimate
+`ComputationHandle`, replaces its explicit signal dependencies atomically,
+executes its JavaScript-owned update function once, and stores the binding by
+the opaque computation handle.
+
+`flush()` calls the existing runtime drain exactly once, resolves the returned
+handles through the private binding map, and executes live bindings in
+Rust-provided FIFO order. It does not schedule work, infer dependencies, drain
+again, or execute Rust callbacks. Signal writes performed during an update stay
+pending for a later explicit flush. Reentrant flushes are rejected.
+
+One active binding context is permitted per dedicated `ReactiveCore` instance.
+The context borrows the runtime, signals, host context, and DOM nodes; it owns
+only its computations and subscriptions. Binding and context disposal removes
+subscriptions and computations without disposing the borrowed runtime or
+signals. Unknown pending computations fail closed because the existing runtime
+drain is global and destructive; shared-runtime renderer support remains
+deferred.
+
+The browser command is `corepack pnpm test:browser:bindings`. It builds the
+real release WASM bindings and runs explicit text, attribute, property,
+ordering, batching, reentrancy, disposal, foreign-instance, detached-target,
+and unknown-pending checks in hosted Chromium. No public root, component,
+compiler, scheduler, or automatic tracking behavior is added.
 
 ## Development
 

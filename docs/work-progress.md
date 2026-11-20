@@ -101,9 +101,10 @@
   capped rows are accepted only when official samples clear timer safety and
   the quantization-aware four-timer-quantum IQR gate, while unreliable capped
   rows remain unresolved with explicit metadata and validator checks.
-- [x] Verified the bounded calibration-cap policy in hosted workflow
-  `44686678206`: Node and Chromium each produced 263/263 valid benchmark rows
-  with no unresolved or zero-sample measurements; artifact `14606767528`.
+- [x] Verified the bounded calibration-cap policy in final hosted workflow
+  `44688529334`: Node and Chromium each produced 263/263 valid benchmark rows
+  with no unresolved or zero-sample measurements; Chromium exercised two
+  `capped_reliable` rows; artifact `14608145275`.
 - [x] Inspected the implemented M2 RustReactiveCore, WASM bridge, TypeScript
   runtime, browser harness, and empty DOM package boundary for M3.1.
 - [x] Drafted the documentation-only M3.1 DOM renderer architecture covering

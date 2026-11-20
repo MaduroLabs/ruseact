@@ -203,7 +203,7 @@ jobs:
           mkdir -p target/m3.5-results
           corepack pnpm benchmark:browser:dom
       - name: Validate M3.5 DOM benchmark results
-        run: corepack pnpm benchmark:dom:validate -- target/m3.5-results/dom-results.json
+        run: corepack pnpm benchmark:dom:validate target/m3.5-results/dom-results.json
       - name: Upload M3.5 DOM benchmark results
         if: always()
         uses: actions/upload-artifact@v4

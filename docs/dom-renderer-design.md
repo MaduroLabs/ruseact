@@ -933,7 +933,46 @@ deduplication, batching, write-during-flush behavior, reentrancy, failed
 registration cleanup, binding/context disposal, foreign instances, detached
 targets, unknown pending work, and preservation of borrowed resources.
 
-## 21. Summary
+## 21. M3.4 internal root lifecycle implementation note
+
+M3.4 implements the first internal root coordinator in
+`packages/ruseact-dom/src/root.ts`. It is deliberately narrower than the
+public renderer design described above: it does not publish `createRoot`,
+accept a view descriptor, execute components, reconcile structure, schedule
+updates, or infer dependencies.
+
+`createRootContext(container, runtime)` claims one Element or DocumentFragment
+through a module-private root registry and an existing HostContext. The root
+borrows both the container and ReactiveCore. Its imperative mount callback
+receives a restricted scope that delegates DOM mutations and explicit binding
+registration to the already-tested M3.2 and M3.3 contexts. No second DOM
+ownership registry or reactive graph is introduced.
+
+The internal states are `created`, `mounting`, `mounted`, `unmounting`,
+`unmounted`, `cleanup_failed`, and `disposed`. Mount creates a BindingContext,
+executes setup and initial binding updates, and marks the root mounted only
+after setup succeeds. Failed setup disposes bindings before the HostContext,
+removes only renderer-created nodes/listeners, preserves unrelated container
+children, and returns the original error when cleanup succeeds. A cleanup
+failure is reported separately and retains the container claim fail-closed.
+
+Root flush is valid only while mounted and delegates one existing binding
+flush pass. Unmount disposes renderer-created computations and subscriptions
+before host listener/node cleanup, releases the container claim, and is
+idempotent. The old root cannot be remounted; a new root may reuse the
+container after successful cleanup. Root disposal is permanent and never
+disposes borrowed application signals or the ReactiveCore.
+
+Because M3.3's pending drain is global and destructive, each active mounted
+root requires a dedicated ReactiveCore. A second root can be constructed with
+the same runtime, but mounting it while another binding context is active fails
+with `runtime_in_use`; pending work is never silently shared or stolen. The
+hosted `test:browser:root` command verifies this restriction, real WASM
+updates, rollback, detachment, event cleanup, unmount, disposal, and container
+reuse. Public lifecycle, component, compiler, keyed-list, and scheduling
+decisions remain future milestones.
+
+## 22. Summary
 
 M2 supplies a deterministic reactive invalidation substrate, not a renderer.
 The safest first DOM architecture is therefore an explicitly owned

@@ -109,6 +109,7 @@ function browserPage() {
     </script>
     <script type="module">
       const checks = [];
+      let activeRoot;
       function check(condition, name) {
         if (!condition) throw new Error("check failed: " + name);
         checks.push(name);
@@ -116,8 +117,29 @@ function browserPage() {
       function success(value) {
         return { ok: true, value };
       }
+      function describeFailure(result) {
+        if (result === null || typeof result !== "object" || result.ok !== false) {
+          return { rootState: activeRoot?.state ?? "unavailable" };
+        }
+        const error = result.error;
+        if (error === null || typeof error !== "object") {
+          return { rootState: activeRoot?.state ?? "unavailable" };
+        }
+        return {
+          kind: error.kind,
+          code: error.code,
+          operation: error.operation,
+          resource: error.resource,
+          causeCode: error.causeCode ?? null,
+          cleanupCode: error.cleanupCode ?? null,
+          rootState: activeRoot?.state ?? "unavailable",
+        };
+      }
       function value(result, name) {
-        check(result !== null && typeof result === "object" && result.ok === true, name);
+        if (result === null || typeof result !== "object" || result.ok !== true) {
+          throw new Error("check failed: " + name + "; result=" + JSON.stringify(describeFailure(result)));
+        }
+        check(true, name);
         return result.value;
       }
       function expectError(result, code, name) {
@@ -127,14 +149,16 @@ function browserPage() {
 
       try {
         window.__ruseactStage = "importing-modules";
-        const [{ default: initializeWasm, ...wasm }, runtimeModule, rootModule] = await Promise.all([
+        const [{ default: initializeWasm, ...wasm }, runtimeModule, rootModule, hostModule] = await Promise.all([
           import("./generated/ruseact_wasm.js"),
           import("./ruseact/src/index.js"),
           import("./ruseact-dom/src/root.js"),
+          import("./ruseact-dom/src/host.js"),
         ]);
         window.__ruseactStage = "modules-imported";
         const { createReactiveCore } = runtimeModule;
         const { createRootContext } = rootModule;
+        const { createHostContext } = hostModule;
         await initializeWasm();
         window.__ruseactStage = "wasm-initialized";
 
@@ -153,7 +177,8 @@ function browserPage() {
         unrelated.textContent = "preserve me";
         document.body.appendChild(container);
         container.appendChild(unrelated);
-        const root = value(createRootContext(container, runtime), "root creation");
+        activeRoot = value(createRootContext(container, runtime), "root creation");
+        const root = activeRoot;
         check(root.state === "created", "root starts in created state");
 
         let scope;
@@ -420,6 +445,73 @@ function browserPage() {
         value(detachedRoot.unmount(), "detached root unmount");
         value(detachedRoot.dispose(), "detached root disposal");
         value(detachedRuntime.dispose(), "detached runtime disposal");
+
+        const movedRuntime = value(await createReactiveCore(() => wasm), "moved runtime initializes");
+        const movedContainer = document.createElement("main");
+        document.body.appendChild(movedContainer);
+        const movedRoot = value(createRootContext(movedContainer, movedRuntime), "moved root creation");
+        const movedSignal = value(movedRuntime.createSignal(0), "moved signal creation");
+        let movedSection;
+        let movedText;
+        value(movedRoot.mount((movedScope) => {
+          movedSection = movedScope.createElement("section");
+          movedText = movedScope.createTextNode("");
+          movedScope.appendChild(movedSection, movedText);
+          const binding = movedScope.registerBinding({
+            target: movedText,
+            dependencies: [movedSignal],
+            update: () => {
+              const current = movedRuntime.get(movedSignal);
+              if (!current.ok) return current;
+              return success(movedScope.setText(movedText, "moved " + current.value));
+            },
+            key: "moved",
+          });
+          if (!binding.ok) return binding;
+          movedScope.appendChild(movedScope.container, movedSection);
+          return success(undefined);
+        }), "moved root mount");
+        const unmanagedParent = document.createElement("div");
+        document.body.appendChild(unmanagedParent);
+        unmanagedParent.appendChild(movedSection);
+        value(movedRuntime.set(movedSignal, 1), "moved signal write");
+        expectError(movedRoot.flush(), "detached_node", "mounted subtree moved to unmanaged DOM fails closed");
+        check(movedText.nodeValue === "moved 0", "moved subtree is not mutated");
+        value(movedRoot.unmount(), "moved root unmount");
+        check(unmanagedParent.contains(movedSection), "cleanup does not remove a moved foreign subtree");
+        unmanagedParent.remove();
+        value(movedRoot.dispose(), "moved root disposal");
+        value(movedRuntime.dispose(), "moved runtime disposal");
+
+        const foreignDocument = document.implementation.createHTMLDocument("foreign");
+        const foreignHost = createHostContext(foreignDocument);
+        foreignHost.claimContainer(foreignDocument.body);
+        let foreignDocumentError;
+        try {
+          foreignHost.claimContainer(document.createElement("main"));
+        } catch (error) {
+          foreignDocumentError = error;
+        }
+        check(foreignDocumentError?.code === "foreign_document", "foreign document container is rejected");
+        const foreignNode = foreignHost.createElement("div");
+        const foreignDocumentRuntime = value(await createReactiveCore(() => wasm), "foreign document runtime initializes");
+        const foreignDocumentContainer = document.createElement("main");
+        document.body.appendChild(foreignDocumentContainer);
+        const foreignDocumentRoot = value(
+          createRootContext(foreignDocumentContainer, foreignDocumentRuntime),
+          "foreign document root creation",
+        );
+        expectError(
+          foreignDocumentRoot.mount((foreignDocumentScope) => {
+            foreignDocumentScope.appendChild(foreignDocumentScope.container, foreignNode);
+            return success(undefined);
+          }),
+          "foreign_node",
+          "foreign document host node is rejected",
+        );
+        value(foreignDocumentRoot.dispose(), "foreign document root disposal");
+        value(foreignDocumentRuntime.dispose(), "foreign document runtime disposal");
+        foreignHost.dispose();
 
         value(root.unmount(), "primary root unmount");
         check(root.state === "unmounted", "root becomes unmounted");

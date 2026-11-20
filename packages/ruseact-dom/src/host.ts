@@ -180,10 +180,40 @@ function hasForeignChildren(node: Node, context: HostContext): boolean {
   return false;
 }
 
+function reachesClaimedContainer(node: Node, context: HostContext): boolean {
+  let current: Node | null = node;
+  while (current !== null) {
+    const record = NODE_OWNERS.get(current);
+    if (record === undefined || record.context !== context) {
+      return false;
+    }
+    if (record.kind === "container") {
+      return true;
+    }
+    current = current.parentNode;
+  }
+  return false;
+}
+
+function hasValidStagedAncestors(node: Node, context: HostContext): boolean {
+  let current = node.parentNode;
+  while (current !== null) {
+    const record = NODE_OWNERS.get(current);
+    if (record === undefined || record.context !== context || record.kind === "container") {
+      return false;
+    }
+    current = current.parentNode;
+  }
+  return true;
+}
+
 function markInsertedSubtree(node: Node, context: HostContext): void {
   const record = NODE_OWNERS.get(node);
   if (record !== undefined && record.context === context) {
-    record.inserted = true;
+    // A subtree may be assembled before it is attached to the claimed
+    // container. It becomes mounted only once its ancestry reaches that
+    // ownership boundary; until then it remains a valid staged subtree.
+    record.inserted = reachesClaimedContainer(node, context);
     record.detached = false;
   }
   for (const child of Array.from(node.childNodes)) {
@@ -269,6 +299,17 @@ export function createHostContext(document: Document): HostContext {
         }
         top = parent;
       }
+    } else if (
+      record.kind === "created" &&
+      record.node.parentNode !== null &&
+      !hasValidStagedAncestors(record.node, context)
+    ) {
+      markDetachedSubtree(record.node, context);
+      throw hostError(
+        "detached_node",
+        operation,
+        "created node is attached outside its owning staged subtree",
+      );
     }
     return record;
   }

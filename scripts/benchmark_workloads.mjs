@@ -13,6 +13,7 @@ const CALIBRATION_MAX_BATCHES = 64;
 const CALIBRATION_MAX_SAMPLE_NS = 50_000_000;
 const CALIBRATION_MAX_ATTEMPTS = 3;
 const CALIBRATION_RETRY_MULTIPLIER = 2;
+const TIMER_QUANTIZATION_DISPERSION_QUANTA = 4;
 
 export const BENCHMARK_CONFIG = Object.freeze({
   schema_version: 1,
@@ -31,7 +32,10 @@ export const BENCHMARK_CONFIG = Object.freeze({
   calibration_max_sample_ns: CALIBRATION_MAX_SAMPLE_NS,
   calibration_max_attempts: CALIBRATION_MAX_ATTEMPTS,
   calibration_retry_multiplier: CALIBRATION_RETRY_MULTIPLIER,
-  timer_resolution_policy: "official zero or non-finite samples trigger bounded whole-attempt recalibration; final zero-median, zero-sample, non-finite, or calibration-limit rows are unresolved and fail validation",
+  calibration_safety_multiplier: CALIBRATION_RESOLUTION_MULTIPLIER,
+  timer_quantization_dispersion_quanta: TIMER_QUANTIZATION_DISPERSION_QUANTA,
+  timer_resolution_policy: "the 2 ms calibration floor is preferred, but a capped attempt is accepted only when official samples clear the timer-safety median and quantization-aware dispersion gate; zero, non-finite, negative, or unreliable rows remain unresolved",
+  official_sample_dispersion_policy: "for capped attempts, central-50-percent interquartile range must be no more than four observed timer quanta plus 1 ns rounding tolerance; target-reached dispersion remains recorded for diagnostics",
   p95_method: "nearest-rank sample quantile",
 });
 
@@ -91,9 +95,36 @@ function nearestRank(values, percentile) {
   return sorted[index];
 }
 
-export function summarizeSamples(descriptor, samplesNs) {
+function sampleStatistics(samplesNs) {
+  if (samplesNs.length === 0 || samplesNs.some((sample) => !Number.isFinite(sample))) {
+    return {
+      medianNs: Number.NaN,
+      p95Ns: Number.NaN,
+      dispersionNs: Number.NaN,
+      iqrNs: Number.NaN,
+      stabilityLowerNs: Number.NaN,
+    };
+  }
   const medianNs = median(samplesNs);
   const p95Ns = nearestRank(samplesNs, 0.95);
+  const q1Ns = nearestRank(samplesNs, 0.25);
+  const q3Ns = nearestRank(samplesNs, 0.75);
+  const iqrNs = q3Ns - q1Ns;
+  return {
+    medianNs,
+    p95Ns,
+    dispersionNs: p95Ns - medianNs,
+    iqrNs,
+    // The central-50-percent lower bound is used only as a measurement-quality
+    // gate, not as a performance threshold. It is robust to isolated scheduler
+    // pauses while rejecting a split trial distribution near timer noise.
+    stabilityLowerNs: medianNs - iqrNs,
+  };
+}
+
+export function summarizeSamples(descriptor, samplesNs) {
+  const statistics = sampleStatistics(samplesNs);
+  const { medianNs, p95Ns, dispersionNs: sampleDispersionNs } = statistics;
   const operations = descriptor.timed_operations;
   return {
     layer: descriptor.layer,
@@ -124,6 +155,15 @@ export function summarizeSamples(descriptor, samplesNs) {
     measurement_attempts: descriptor.measurement_attempts ?? [],
     recalibration_count: descriptor.recalibration_count ?? 0,
     calibration_limit_reached: descriptor.calibration_limit_reached ?? false,
+    timer_safety_target_ns: descriptor.timer_safety_target_ns ?? null,
+    sample_dispersion_ns: descriptor.sample_dispersion_ns ?? sampleDispersionNs,
+    sample_iqr_ns: descriptor.sample_iqr_ns ?? statistics.iqrNs,
+    sample_stability_lower_ns: descriptor.sample_stability_lower_ns ?? statistics.stabilityLowerNs,
+    sample_dispersion_limit_ns: descriptor.sample_dispersion_limit_ns ?? null,
+    dispersion_gate_applied: descriptor.dispersion_gate_applied ?? false,
+    measurement_validity: descriptor.measurement_validity ?? "not_calibrated",
+    calibration_limit_decision: descriptor.calibration_limit_decision ?? "not_applicable",
+    measurement_quality_reason: descriptor.measurement_quality_reason ?? null,
     unresolved_reason: descriptor.unresolved_reason ?? null,
   };
 }
@@ -193,9 +233,99 @@ async function executeBatch(clock, setup, operation, cleanup, validate, batchCou
   return elapsedNs;
 }
 
-export function calibrationTargetNs(clock) {
+export function timerSafetyTargetNs(clock) {
   const resolutionNs = clock.resolutionNs ?? CALIBRATION_MIN_DURATION_NS;
-  return Math.max(CALIBRATION_MIN_DURATION_NS, resolutionNs * CALIBRATION_RESOLUTION_MULTIPLIER);
+  return Math.max(1, resolutionNs * CALIBRATION_RESOLUTION_MULTIPLIER);
+}
+
+function timerQuantizationDispersionLimitNs(clock) {
+  const resolutionNs = clock.resolutionNs ?? CALIBRATION_MIN_DURATION_NS;
+  return Math.max(1, resolutionNs * TIMER_QUANTIZATION_DISPERSION_QUANTA + 1);
+}
+
+export function calibrationTargetNs(clock) {
+  return Math.max(CALIBRATION_MIN_DURATION_NS, timerSafetyTargetNs(clock));
+}
+
+export function assessOfficialSamples(clock, samplesNs, { requireDispersion = true } = {}) {
+  const timerSafetyTarget = timerSafetyTargetNs(clock);
+  const dispersionLimit = timerQuantizationDispersionLimitNs(clock);
+  const statistics = sampleStatistics(samplesNs);
+  if (samplesNs.length === 0) {
+    return {
+      reliable: false,
+      reason: "missing_official_samples",
+      timerSafetyTargetNs: timerSafetyTarget,
+      dispersionLimitNs: dispersionLimit,
+      ...statistics,
+    };
+  }
+  if (samplesNs.some((sample) => !Number.isFinite(sample))) {
+    return {
+      reliable: false,
+      reason: "non_finite_sample",
+      timerSafetyTargetNs: timerSafetyTarget,
+      dispersionLimitNs: dispersionLimit,
+      ...statistics,
+    };
+  }
+  if (samplesNs.some((sample) => sample === 0)) {
+    return {
+      reliable: false,
+      reason: "zero_sample",
+      timerSafetyTargetNs: timerSafetyTarget,
+      dispersionLimitNs: dispersionLimit,
+      ...statistics,
+    };
+  }
+  if (samplesNs.some((sample) => sample < 0)) {
+    return {
+      reliable: false,
+      reason: "negative_sample",
+      timerSafetyTargetNs: timerSafetyTarget,
+      dispersionLimitNs: dispersionLimit,
+      ...statistics,
+    };
+  }
+
+  const { medianNs, p95Ns, dispersionNs } = statistics;
+  if (medianNs < timerSafetyTarget) {
+    return {
+      reliable: false,
+      reason: "below_timer_safety_target",
+      timerSafetyTargetNs: timerSafetyTarget,
+      dispersionLimitNs: dispersionLimit,
+      medianNs,
+      p95Ns,
+      dispersionNs,
+      iqrNs: statistics.iqrNs,
+      stabilityLowerNs: statistics.stabilityLowerNs,
+    };
+  }
+  if (requireDispersion && statistics.iqrNs > dispersionLimit) {
+    return {
+      reliable: false,
+      reason: "excessive_dispersion",
+      timerSafetyTargetNs: timerSafetyTarget,
+      dispersionLimitNs: dispersionLimit,
+      medianNs,
+      p95Ns,
+      dispersionNs,
+      iqrNs: statistics.iqrNs,
+      stabilityLowerNs: statistics.stabilityLowerNs,
+    };
+  }
+  return {
+    reliable: true,
+    reason: null,
+    timerSafetyTargetNs: timerSafetyTarget,
+    dispersionLimitNs: dispersionLimit,
+    medianNs,
+    p95Ns,
+    dispersionNs,
+    iqrNs: statistics.iqrNs,
+    stabilityLowerNs: statistics.stabilityLowerNs,
+  };
 }
 
 export async function calibrateCase(clock, setup, operation, cleanup, validate, minimumBatchCount = 1) {
@@ -206,7 +336,7 @@ export async function calibrateCase(clock, setup, operation, cleanup, validate, 
   while (true) {
     elapsedNs = await executeBatch(clock, setup, operation, cleanup, validate, batchCount);
     samplesNs.push(elapsedNs);
-    if (elapsedNs >= targetNs || elapsedNs >= CALIBRATION_MAX_SAMPLE_NS || batchCount >= CALIBRATION_MAX_BATCHES) break;
+    if (!Number.isFinite(elapsedNs) || elapsedNs >= targetNs || elapsedNs >= CALIBRATION_MAX_SAMPLE_NS || batchCount >= CALIBRATION_MAX_BATCHES) break;
     const resolutionNs = Math.max(1, clock.resolutionNs ?? CALIBRATION_MIN_DURATION_NS);
     const denominator = Math.max(elapsedNs, resolutionNs);
     const suggested = Math.ceil(targetNs / denominator);
@@ -216,23 +346,17 @@ export async function calibrateCase(clock, setup, operation, cleanup, validate, 
     batchCount,
     targetNs,
     samplesNs,
-    limitReached: elapsedNs < targetNs,
+    timerSafetyTargetNs: timerSafetyTargetNs(clock),
+    limitReached: Number.isFinite(elapsedNs) && elapsedNs < targetNs,
   };
 }
 
-function measurementFailureReason(calibration, samplesNs, attempts) {
-  if (calibration.limitReached) return "calibration_limit_reached_below_target";
-  if (samplesNs.some((sample) => !Number.isFinite(sample))) {
-    return attempts >= CALIBRATION_MAX_ATTEMPTS
-      ? "non_finite_sample_after_recalibration_limit"
-      : "non_finite_sample_requires_recalibration";
-  }
-  if (samplesNs.some((sample) => sample === 0)) {
-    return attempts >= CALIBRATION_MAX_ATTEMPTS
-      ? "zero_sample_after_recalibration_limit"
-      : "zero_sample_requires_recalibration";
-  }
-  return null;
+function measurementFailureReason(quality, attempts) {
+  if (quality.reliable) return null;
+  const suffix = attempts >= CALIBRATION_MAX_ATTEMPTS
+    ? "after_recalibration_limit"
+    : "requires_recalibration";
+  return `${quality.reason}_${suffix}`;
 }
 
 export async function measureCase(clock, descriptor, setup, operation, cleanup, validate) {
@@ -241,6 +365,7 @@ export async function measureCase(clock, descriptor, setup, operation, cleanup, 
   let minimumBatchCount = 1;
   let finalCalibration;
   let finalSamplesNs;
+  let finalQuality;
   let unresolvedReason = null;
 
   for (let attempt = 1; attempt <= CALIBRATION_MAX_ATTEMPTS; attempt += 1) {
@@ -263,7 +388,21 @@ export async function measureCase(clock, descriptor, setup, operation, cleanup, 
       samplesNs.push(await executeBatch(clock, setup, operation, cleanup, validate, calibration.batchCount));
     }
 
-    const failureReason = measurementFailureReason(calibration, samplesNs, attempt);
+    const quality = assessOfficialSamples(clock, samplesNs, { requireDispersion: calibration.limitReached });
+    const failureReason = measurementFailureReason(quality, attempt);
+    const calibrationLimitDecision = calibration.limitReached
+      ? failureReason === null
+        ? "accepted_reliable_official_samples"
+        : "rejected_unreliable_official_samples"
+      : failureReason === null
+        ? "target_reached"
+        : "official_samples_unreliable";
+    const measurementValidity = failureReason === null
+      ? calibration.limitReached ? "capped_reliable" : "calibrated"
+      : "unresolved";
+    const measurementQualityReason = quality.reason ?? (
+      calibration.limitReached ? "official_samples_clear_timer_safety_and_dispersion" : null
+    );
     measurementAttempts.push({
       attempt,
       calibration_batches: calibration.batchCount,
@@ -271,12 +410,24 @@ export async function measureCase(clock, descriptor, setup, operation, cleanup, 
       calibration_target_ns: calibration.targetNs,
       calibration_samples_ns: calibration.samplesNs,
       calibration_limit_reached: calibration.limitReached,
+      timer_safety_target_ns: quality.timerSafetyTargetNs,
+      sample_median_ns: quality.medianNs,
+      sample_p95_ns: quality.p95Ns,
+      sample_dispersion_ns: quality.dispersionNs,
+      sample_iqr_ns: quality.iqrNs,
+      sample_stability_lower_ns: quality.stabilityLowerNs,
+      sample_dispersion_limit_ns: quality.dispersionLimitNs,
+      dispersion_gate_applied: calibration.limitReached,
       samples_ns: samplesNs,
       status: failureReason === null ? "accepted" : "recalibrate",
       failure_reason: failureReason,
+      measurement_validity: measurementValidity,
+      calibration_limit_decision: calibrationLimitDecision,
+      measurement_quality_reason: measurementQualityReason,
     });
     finalCalibration = calibration;
     finalSamplesNs = samplesNs;
+    finalQuality = quality;
     unresolvedReason = failureReason;
 
     if (failureReason === null) break;
@@ -295,6 +446,21 @@ export async function measureCase(clock, descriptor, setup, operation, cleanup, 
     calibration_target_ns: finalCalibration.targetNs,
     calibration_samples_ns: finalCalibration.samplesNs,
     calibration_limit_reached: finalCalibration.limitReached,
+    timer_safety_target_ns: finalQuality.timerSafetyTargetNs,
+    sample_dispersion_ns: finalQuality.dispersionNs,
+    sample_iqr_ns: finalQuality.iqrNs,
+    sample_stability_lower_ns: finalQuality.stabilityLowerNs,
+    sample_dispersion_limit_ns: finalQuality.dispersionLimitNs,
+    dispersion_gate_applied: finalCalibration.limitReached,
+    measurement_validity: finalQuality.reliable
+      ? finalCalibration.limitReached ? "capped_reliable" : "calibrated"
+      : "unresolved",
+    calibration_limit_decision: finalCalibration.limitReached
+      ? finalQuality.reliable ? "accepted_reliable_official_samples" : "rejected_unreliable_official_samples"
+      : finalQuality.reliable ? "target_reached" : "official_samples_unreliable",
+    measurement_quality_reason: finalQuality.reason ?? (
+      finalCalibration.limitReached ? "official_samples_clear_timer_safety_and_dispersion" : null
+    ),
     calibration_attempts: measurementAttempts.map((attempt) => ({
       attempt: attempt.attempt,
       calibration_batches: attempt.calibration_batches,
@@ -302,12 +468,19 @@ export async function measureCase(clock, descriptor, setup, operation, cleanup, 
       calibration_target_ns: attempt.calibration_target_ns,
       calibration_samples_ns: attempt.calibration_samples_ns,
       calibration_limit_reached: attempt.calibration_limit_reached,
+      timer_safety_target_ns: attempt.timer_safety_target_ns,
+      sample_dispersion_ns: attempt.sample_dispersion_ns,
+      sample_iqr_ns: attempt.sample_iqr_ns,
+      sample_stability_lower_ns: attempt.sample_stability_lower_ns,
+      sample_dispersion_limit_ns: attempt.sample_dispersion_limit_ns,
+      dispersion_gate_applied: attempt.dispersion_gate_applied,
+      measurement_validity: attempt.measurement_validity,
+      calibration_limit_decision: attempt.calibration_limit_decision,
+      measurement_quality_reason: attempt.measurement_quality_reason,
     })),
     measurement_attempts: measurementAttempts,
     recalibration_count: measurementAttempts.length - 1,
-    unresolved_reason: unresolvedReason === null || unresolvedReason === "zero_sample_requires_recalibration" || unresolvedReason === "non_finite_sample_requires_recalibration"
-      ? null
-      : unresolvedReason,
+    unresolved_reason: unresolvedReason,
   };
   return summarizeSamples(timedDescriptor, finalSamplesNs);
 }

@@ -97,6 +97,14 @@
 - [x] Stabilized intermittent Chromium benchmark samples with a conservative
   2 ms timer target and bounded whole-attempt recalibration; no benchmark
   operation definitions or runtime semantics changed.
+- [x] Separated the preferred M2.5 calibration floor from measurement validity;
+  capped rows are accepted only when official samples clear timer safety and
+  the quantization-aware four-timer-quantum IQR gate, while unreliable capped
+  rows remain unresolved with explicit metadata and validator checks.
+- [x] Verified the bounded calibration-cap policy in final hosted workflow
+  `44688529334`: Node and Chromium each produced 263/263 valid benchmark rows
+  with no unresolved or zero-sample measurements; Chromium exercised two
+  `capped_reliable` rows; artifact `14608145275`.
 - [x] Inspected the implemented M2 RustReactiveCore, WASM bridge, TypeScript
   runtime, browser harness, and empty DOM package boundary for M3.1.
 - [x] Drafted the documentation-only M3.1 DOM renderer architecture covering
@@ -328,7 +336,10 @@
   verification is intended to gate merges.
 - M2.5 benchmark timing has no performance pass/fail threshold, but its
   integrity gate rejects missing, non-finite, zero-sample, all-zero,
-  zero-median, or calibration-limit rows.
+  zero-median, or unreliable rows. A calibration-cap row is valid only when
+  its official samples clear the timer-safety median and quantization-aware
+  four-quantum IQR gate; target-reached dispersion remains diagnostic, and the
+  cap decision and quality metadata remain machine-readable.
   Browser completion uses real-time DevTools Protocol polling rather than
   Chromium virtual time or `--dump-dom`. The hosted benchmark workflow uploads
   results as artifacts; local Node diagnostics use host Node `22.23.3` when the

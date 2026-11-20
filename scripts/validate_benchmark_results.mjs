@@ -12,6 +12,18 @@ function nearestRank(values, percentile) {
   return sorted[Math.max(0, Math.ceil(percentile * sorted.length) - 1)];
 }
 
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
+function nearlyEqual(left, right) {
+  return Math.abs(left - right) <= Math.max(1, Math.abs(right) * 1e-12);
+}
+
 const requiredOperations = new Set([
   "signal_creation",
   "signal_read",
@@ -96,7 +108,41 @@ for (const filePath of paths) {
       check(finalAttempt.samples_ns.length === row.samples_ns.length && finalAttempt.samples_ns.every((value, sampleIndex) => value === row.samples_ns[sampleIndex]), `${filePath} row ${index}: final attempt samples`);
     }
     check(Number.isFinite(row.median_ns) && Number.isFinite(row.p95_ns), `${filePath} row ${index}: summary values`);
+    check(row.median_ns === median(row.samples_ns), `${filePath} row ${index}: median calculation`);
     check(row.p95_ns === nearestRank(row.samples_ns, 0.95), `${filePath} row ${index}: p95 calculation`);
+    check(Number.isFinite(row.sample_dispersion_ns) && row.sample_dispersion_ns >= 0, `${filePath} row ${index}: sample dispersion`);
+    check(row.sample_dispersion_ns === row.p95_ns - row.median_ns, `${filePath} row ${index}: sample dispersion calculation`);
+    check(Number.isFinite(row.sample_iqr_ns) && row.sample_iqr_ns >= 0, `${filePath} row ${index}: sample IQR`);
+    check(row.sample_iqr_ns === nearestRank(row.samples_ns, 0.75) - nearestRank(row.samples_ns, 0.25), `${filePath} row ${index}: sample IQR calculation`);
+    check(row.sample_iqr_ns === row.median_ns - row.sample_stability_lower_ns, `${filePath} row ${index}: sample stability calculation`);
+    check(Number.isFinite(row.sample_stability_lower_ns), `${filePath} row ${index}: sample stability lower bound`);
+    check(row.sample_dispersion_limit_ns === null || (Number.isFinite(row.sample_dispersion_limit_ns) && row.sample_dispersion_limit_ns > 0), `${filePath} row ${index}: sample dispersion limit`);
+    check(row.dispersion_gate_applied === true || row.dispersion_gate_applied === false, `${filePath} row ${index}: dispersion gate flag`);
+    check(row.measurement_quality_reason === null || typeof row.measurement_quality_reason === "string", `${filePath} row ${index}: measurement quality reason`);
+    if (row.size === null) {
+      check(row.measurement_validity === "not_calibrated", `${filePath} row ${index}: cold measurement validity`);
+      check(row.calibration_limit_decision === "not_applicable", `${filePath} row ${index}: cold calibration decision`);
+      check(row.timer_safety_target_ns === null, `${filePath} row ${index}: cold timer-safety target`);
+      check(row.sample_dispersion_limit_ns === null, `${filePath} row ${index}: cold dispersion limit`);
+      check(row.dispersion_gate_applied === false, `${filePath} row ${index}: cold dispersion gate`);
+    } else {
+      check(Number.isFinite(row.timer_safety_target_ns) && row.timer_safety_target_ns > 0, `${filePath} row ${index}: timer-safety target`);
+      check(nearlyEqual(row.sample_dispersion_limit_ns, row.timer_safety_target_ns / report.configuration.calibration_safety_multiplier * report.configuration.timer_quantization_dispersion_quanta + 1), `${filePath} row ${index}: sample dispersion limit calculation`);
+      check(row.measurement_validity === "calibrated" || row.measurement_validity === "capped_reliable" || row.measurement_validity === "unresolved", `${filePath} row ${index}: measurement validity`);
+      check(row.calibration_limit_reached === true || row.calibration_limit_reached === false, `${filePath} row ${index}: calibration limit flag`);
+      if (row.measurement_validity === "unresolved") {
+        check(typeof row.unresolved_reason === "string" && row.unresolved_reason.length > 0, `${filePath} row ${index}: unresolved reason`);
+        check(row.calibration_limit_reached
+          ? row.calibration_limit_decision === "rejected_unreliable_official_samples"
+          : row.calibration_limit_decision === "official_samples_unreliable", `${filePath} row ${index}: rejected calibration decision`);
+      } else {
+        check(row.unresolved_reason === null, `${filePath} row ${index}: resolved row has no unresolved reason`);
+        check(row.calibration_limit_reached
+          ? row.measurement_validity === "capped_reliable" && row.calibration_limit_decision === "accepted_reliable_official_samples"
+          : row.measurement_validity === "calibrated" && row.calibration_limit_decision === "target_reached", `${filePath} row ${index}: accepted calibration decision`);
+        check(!row.calibration_limit_reached || row.sample_iqr_ns <= row.sample_dispersion_limit_ns, `${filePath} row ${index}: capped dispersion gate`);
+      }
+    }
     check(Number.isFinite(row.median_operations_per_second) && row.median_operations_per_second > 0, `${filePath} row ${index}: throughput`);
     if (!operationsByLayer.has(row.layer)) operationsByLayer.set(row.layer, new Set());
     operationsByLayer.get(row.layer).add(row.operation);

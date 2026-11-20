@@ -29,6 +29,7 @@ function ruseactUnmountOperations(size) {
 function nativeMountOperations(size) {
   if (size === 1) return 100_000;
   if (size === 10) return 10_000;
+  if (size === 100) return 4;
   return 1;
 }
 

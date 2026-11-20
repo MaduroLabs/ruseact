@@ -578,3 +578,60 @@ signals, host context, and DOM nodes alive. A detached target is rejected by
 the host ownership boundary and its binding is cleaned up before the flush
 reports the failure. No scheduler, automatic dependency tracking, component
 execution, compiler, public root API, or virtual DOM is introduced.
+
+## Decision 23: M3.4 implements an internal root lifecycle coordinator
+
+M3.4 adds `packages/ruseact-dom/src/root.ts` as a narrow internal coordinator
+over the M3.2 host and M3.3 binding contexts. It does not export a public
+`createRoot` API, finalize a view descriptor, or change the RustReactiveCore,
+WASM ABI, public TypeScript runtime, or package entry point.
+
+`createRootContext(container, runtime)` validates an Element or
+DocumentFragment, records a module-private container ownership token, creates
+one HostContext, and claims the container through the existing host ownership
+registry. The root borrows the container and ReactiveCore. A second active
+root for the same container fails with `duplicate_root`; unrelated existing
+container children are never cleared or adopted.
+
+The internal mount boundary is an imperative callback receiving a restricted
+`RootMountScope`. The scope delegates node creation, insertion, text,
+attribute, property, listener, and explicit binding registration to the
+existing host and binding contexts. It does not expose host or binding
+disposal, does not define a permanent view/template format, and does not
+execute components. A BindingContext is created when mounting begins, so one
+active mounted root still consumes at most one dedicated ReactiveCore pending
+queue. A second root may be created with the same runtime, but its mount fails
+closed with the existing `runtime_in_use` contract while another binding
+context is active.
+
+The lifecycle states are `created`, `mounting`, `mounted`, `unmounting`,
+`unmounted`, `cleanup_failed`, and `disposed`. Mount performs setup through the
+imperative scope and marks the root mounted only after setup and initial
+binding updates succeed. On failure, binding-context disposal occurs before
+host disposal; host cleanup removes only nodes and listeners owned by the
+attempt. The original setup error is returned when cleanup succeeds. If
+cleanup fails, the root enters `cleanup_failed`, reports a separate cleanup
+error, and retains its container ownership token rather than permitting a
+second root to guess whether resources remain.
+
+`flush()` delegates exactly once to the existing M3.3 binding flush and is
+valid only in `mounted`. It preserves FIFO ordering, deduplication, one-pass
+behavior, reentrancy rejection, and the destructive global-drain limitation.
+No scheduler, recursive drain, automatic dependency tracking, or event-to-flush
+behavior is added.
+
+Unmount marks the root as transitioning, disposes renderer-created bindings,
+subscriptions, and computations, then delegates listener and node cleanup to
+HostContext. Successful unmount releases the root container token and is
+idempotent. A new root may then reuse the container; the old root cannot be
+remounted. Root disposal permanently closes the root but never disposes the
+borrowed ReactiveCore or application-owned signals. A failed or externally
+detached target remains fail-closed through the existing host ownership checks.
+
+The hosted `test:browser:root` harness verifies static construction, explicit
+text/attribute/property bindings, batching and FIFO flush, reentrancy, event
+cleanup, duplicate containers, separate runtimes, shared-runtime rejection,
+mount rollback, foreign-node rejection, detached targets, unmount, disposal,
+borrowed-resource survival, and container reuse. This internal prototype does
+not establish public component, compiler, scheduler, keyed-list, hydration,
+or React-compatible lifecycle semantics.

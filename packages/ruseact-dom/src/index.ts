@@ -1,7 +1,8 @@
 /**
  * Browser host-adapter package boundary.
  *
- * M3.2 host operations and M3.3 explicit bindings remain internal while the
- * public root, view, and lifecycle contracts from M3.1 remain deferred.
+ * M3.2 host operations, M3.3 explicit bindings, and the M3.4 root lifecycle
+ * remain internal while public root, view, and renderer contracts remain
+ * deferred.
  */
 export {};

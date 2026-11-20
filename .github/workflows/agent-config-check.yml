@@ -110,6 +110,10 @@ jobs:
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
         run: pnpm test:browser:bindings
+      - name: Run real Chromium root lifecycle tests
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
+        run: pnpm test:browser:root
 
   benchmark:
     name: Benchmark (M2.5)

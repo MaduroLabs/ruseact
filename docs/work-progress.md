@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m3.3-reactive-dom-bindings`
+- Branch: `feature/m3.4-root-lifecycle`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `20ac8a1af817d8596ad9f070f60aa34d4901c642`
-- Last verified on: Linux x86_64, 2026-11-20 for M3.3 binding integration;
+- Baseline: `origin/develop` at `304e4aed2ec7ed42982688c531445b801e3cbc64`
+- Last verified on: Linux x86_64, 2026-11-20 for M3.4 root lifecycle;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
@@ -124,6 +124,13 @@
 - [x] Added the real-WASM Chromium binding harness for text, attribute,
   property, batching, ordering, write-during-flush, disposal, foreign-instance,
   detached-target, and unknown-pending behavior.
+- [x] Implemented the internal M3.4 root context with private container
+  ownership, imperative mount scope, explicit flush delegation, deterministic
+  unmount/disposal, borrowed runtime preservation, and fail-closed rollback.
+- [x] Added the real-WASM Chromium root lifecycle harness covering static and
+  reactive mount, batching, FIFO ordering, reentrancy, event cleanup, duplicate
+  containers, runtime isolation, rollback, detached targets, disposal, and
+  container reuse.
 
 ## In progress / next
 
@@ -146,8 +153,11 @@
 - [x] Implement the approved internal M3.3 explicit reactive-binding prototype
   without finalizing public view, root, or lifecycle APIs; do not add automatic
   tracking or a scheduler.
-- [ ] Define the separately approved public renderer/view lifecycle and M3.4
-  integration boundaries; shared-runtime binding managers remain unsupported.
+- [x] Define and implement the approved internal M3.4 root/lifecycle boundary;
+  the public renderer/view lifecycle remains deferred and shared-runtime
+  binding managers remain unsupported.
+- [ ] Define the separately approved public renderer/view lifecycle, compiler
+  integration, and M3.5 testing/benchmark handoff.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -277,6 +287,12 @@
   install was blocked by the known read-only InstaBox pnpm store lock; no
   dependency or lockfile change was made. Hosted Chromium binding validation
   is authoritative and pending the feature PR workflow.
+- M3.4 local validation — TypeScript typecheck, root harness syntax, release
+  WASM build, matching `wasm-bindgen-cli 0.2.130` generation, and diff checks
+  pass on Linux x86_64. The local Chromium harness cannot bind its temporary
+  loopback server in this InstaBox (`listen EPERM`); hosted GitHub Chromium is
+  authoritative. Full Rust, package, policy, and hosted browser results are
+  recorded after the feature PR workflow completes.
 
 ## Blockers / decisions
 
@@ -340,3 +356,8 @@
   the existing pending drain is global and destructive. Unknown pending
   computations fail closed, but the current ABI cannot restore a consumed
   snapshot; scoped draining and rollback remain future decisions.
+- M3.4 keeps the public root/view lifecycle unresolved. Its internal root
+  context borrows the ReactiveCore and container, owns only renderer-created
+  resources, and requires a dedicated runtime per active binding context. A
+  cleanup failure enters a fail-closed state and retains the container claim;
+  no recovery protocol or new ABI was added.

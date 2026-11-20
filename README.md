@@ -23,8 +23,9 @@ Ruseact explores a different separation of responsibilities:
 - **Rust:** Reactive graph, signal identity, dependency management, and future
   scheduling.
 - **TypeScript/JavaScript:** Component execution and browser-facing integration.
-- **DOM adapter:** Internal M3.2 host operations and the M3.3 explicit binding
-  prototype are implemented; public rendering lifecycle remains deferred.
+- **DOM adapter:** Internal M3.2 host operations, M3.3 explicit bindings, and
+  the M3.4 root lifecycle prototype are implemented; public rendering
+  contracts remain deferred.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -48,6 +49,7 @@ API compatibility is claimed.
 | M3.1 — DOM renderer architecture design | Complete; public renderer decisions remain deferred |
 | M3.2 — DOM host operations | Complete; hosted Chromium validation passed |
 | M3.3 — Reactive DOM bindings | Internal explicit binding prototype complete; no public renderer API |
+| M3.4 — Root mount and lifecycle | Internal root lifecycle prototype complete; no public renderer API |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design approved; M3.2 host and M3.3 binding internals complete |
@@ -99,14 +101,19 @@ The Rust reactive core supports:
   computation handles in FIFO order, and performs one explicit flush pass.
   It borrows the runtime, signals, and host context; it does not add a second
   reactive graph or dispose borrowed resources.
+- An internal M3.4 root context in `packages/ruseact-dom/src/root.ts` that
+  claims one container, coordinates one host and one binding context while
+  mounted, provides an imperative construction scope, performs explicit
+  mount/flush/unmount/dispose transitions, and rolls back renderer-owned
+  nodes, listeners, subscriptions, and computations on mount failure.
 - A test-only M2.5 benchmark harness that separates direct generated WASM
   calls, public TypeScript runtime calls, and real Chromium execution. It
   records deterministic 16/64/256-signal workloads, raw samples, summaries,
   correctness checks, and structured artifacts without changing runtime APIs.
 
 Rust computation execution, automatic dependency tracking, and scheduling are
-not implemented. M3.3 executes explicitly registered JavaScript update
-functions only. The public DOM renderer, compiler, browser bundler matrix, and
+not implemented. M3.3 and M3.4 execute explicitly registered JavaScript
+updates only. The public DOM renderer, compiler, browser bundler matrix, and
 worker handle transfer are also not implemented.
 
 M3.1 documents a proposed DOM renderer architecture in
@@ -154,13 +161,14 @@ event listeners with duplicate detection and exact cleanup. The HTML namespace
 is the only supported namespace; SVG is intentionally rejected. Invalid,
 foreign, detached, and disposed resources produce internal `DomHostError`
 values. Raw HTML, arbitrary property assignment, synthetic events, a virtual
-DOM, and a public root lifecycle are not implemented.
+DOM, and a public root lifecycle are not implemented. M3.4 consumes this host
+only through its internal root coordinator.
 
 The browser test command is `corepack pnpm test:browser:dom`. It uses the
 existing hosted Chromium job; the InstaBox environment is not treated as an
 authoritative local browser environment because it cannot reliably reach its
-own temporary HTTP server. Reactive bindings and computation execution remain
-internal M3.3 functionality; the public root/flush lifecycle remains deferred.
+own temporary HTTP server. Reactive bindings and root lifecycle execution
+remain internal functionality; no public root/flush lifecycle is exported.
 
 ## M3.3 internal reactive DOM bindings
 
@@ -190,6 +198,43 @@ real release WASM bindings and runs explicit text, attribute, property,
 ordering, batching, reentrancy, disposal, foreign-instance, detached-target,
 and unknown-pending checks in hosted Chromium. No public root, component,
 compiler, scheduler, or automatic tracking behavior is added.
+
+## M3.4 internal root mount and lifecycle
+
+M3.4 adds `createRootContext(container, runtime)` in the internal
+`packages/ruseact-dom/src/root.ts` module. The module is not re-exported from
+`packages/ruseact-dom/src/index.ts`; it is an imperative construction boundary,
+not a finalized public `createRoot()` contract.
+
+An active root privately claims one Element or DocumentFragment and borrows
+the container and ReactiveCore. A root creates one HostContext and, while
+mounted, one BindingContext. The mount scope delegates element/text creation,
+insertion, attributes, narrow properties, event listeners, and explicit
+binding registration to those existing contexts. It does not duplicate DOM
+ownership or reactive graph state.
+
+The lifecycle is explicit: `created` → `mounting` → `mounted` →
+`unmounting` → `unmounted` → `disposed`. A mount failure disposes successful
+binding registrations and host resources, removes only renderer-created
+nodes, preserves unrelated container children, and releases the container
+claim when cleanup succeeds. Cleanup failures enter a fail-closed
+`cleanup_failed` state and retain the root claim rather than pretending that
+all resources were released.
+
+`flush()` delegates to the M3.3 one-pass binding flush and is valid only while
+mounted. There is no automatic scheduling, recursive drain, component
+execution, or dependency inference. Unmount disposes renderer computations
+and subscriptions before host listener/node cleanup; borrowed signals and the
+ReactiveCore remain live. Container reuse requires a new root after successful
+cleanup. Multiple active binding roots must use separate ReactiveCore
+instances because the existing pending queue is global and destructive.
+
+The hosted browser command is `corepack pnpm test:browser:root`. It exercises
+real WASM, host operations, binding updates, explicit flush, event cleanup,
+rollback, detachment, duplicate containers, runtime isolation, unmount, and
+container reuse. The package entry point remains empty, and public view,
+component, compiler, scheduler, and renderer API decisions remain future
+work.
 
 ## Development
 

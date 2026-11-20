@@ -141,7 +141,7 @@ async function setupAttributeProperty(runtimeModule, rootModule, wasmModule, siz
     inputs: [],
   };
   const label = unwrap(runtime.createSignal("zero"), "create attribute signal");
-  const disabled = unwrap(runtime.createSignal(false), "create property signal");
+  const disabled = unwrap(runtime.createSignal(true), "create property signal");
   state.label = label;
   state.disabled = disabled;
   const root = unwrap(rootModule.createRootContext(state.container, runtime), "create attribute root");

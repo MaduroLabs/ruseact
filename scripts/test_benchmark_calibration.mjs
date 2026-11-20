@@ -122,6 +122,11 @@ assert.equal(
   3,
   "recalibration is bounded",
 );
+assert.equal(
+  BENCHMARK_CONFIG.timer_quantization_dispersion_quanta,
+  4,
+  "dispersion bound is expressed in timer quanta",
+);
 
 const quantized = await runCase(quantizedClock({ quantumNs: 100_000, operationNs: 70_000 }));
 assert.equal(quantized.recalibration_count, 0, "calibration handles quantized warmup samples");
@@ -153,6 +158,8 @@ assert.equal(cappedReliable.measurement_validity, "capped_reliable", "positive c
 assert.equal(cappedReliable.calibration_limit_decision, "accepted_reliable_official_samples", "capped acceptance is explicit");
 assert.equal(cappedReliable.unresolved_reason, null, "reliable capped samples are not unresolved");
 assert.ok(cappedReliable.samples_ns.every((sample) => sample >= cappedReliable.timer_safety_target_ns), "capped samples clear the timer-safety margin");
+assert.equal(cappedReliable.dispersion_gate_applied, true, "capped acceptance applies the dispersion gate");
+assert.ok(cappedReliable.sample_iqr_ns <= cappedReliable.sample_dispersion_limit_ns, "capped samples clear the quantization-aware dispersion bound");
 
 const dispersed = await runCase(scriptedClock({
   officialDurations: [
@@ -172,6 +179,18 @@ const directQuality = assessOfficialSamples(
 );
 assert.equal(directQuality.reliable, false, "excessive dispersion is rejected independently of calibration");
 assert.equal(directQuality.reason, "excessive_dispersion", "dispersion diagnostic is deterministic");
+const coarseCapped = assessOfficialSamples(
+  { resolutionNs: 100_000 },
+  [1_700_000, 1_700_000, 1_700_000, 2_300_000, 1_800_000, 2_200_000, 1_700_000, 1_700_000, 2_100_000, 1_800_000],
+);
+assert.equal(coarseCapped.reliable, true, "coarse timer samples within the quantization bound remain reliable");
+assert.ok(coarseCapped.iqrNs <= coarseCapped.dispersionLimitNs, "coarse capped samples clear the quantization bound");
+const targetReachedQuality = assessOfficialSamples(
+  { resolutionNs: 100_000 },
+  [3_000_000, 3_000_000, 3_000_000, 7_000_000, 7_000_000, 7_000_000],
+  { requireDispersion: false },
+);
+assert.equal(targetReachedQuality.reliable, true, "target-reached samples retain high dispersion as a diagnostic");
 
 const nonFinite = await runCase(scriptedClock({ officialDurations: Array(10).fill(Number.NaN) }));
 assert.equal(nonFinite.unresolved_reason, "non_finite_sample_after_recalibration_limit", "non-finite samples remain unresolved");

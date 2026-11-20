@@ -99,8 +99,8 @@
   operation definitions or runtime semantics changed.
 - [x] Separated the preferred M2.5 calibration floor from measurement validity;
   capped rows are accepted only when official samples clear timer safety and
-  the robust IQR stability gate, while unreliable capped rows remain
-  unresolved with explicit metadata and validator checks.
+  the quantization-aware four-timer-quantum IQR gate, while unreliable capped
+  rows remain unresolved with explicit metadata and validator checks.
 - [x] Verified the bounded calibration-cap policy in hosted workflow
   `44686678206`: Node and Chromium each produced 263/263 valid benchmark rows
   with no unresolved or zero-sample measurements; artifact `14606767528`.
@@ -320,8 +320,9 @@
 - M2.5 benchmark timing has no performance pass/fail threshold, but its
   integrity gate rejects missing, non-finite, zero-sample, all-zero,
   zero-median, or unreliable rows. A calibration-cap row is valid only when
-  its official samples clear the timer-safety and robust IQR stability gates;
-  the cap decision and quality metadata remain machine-readable.
+  its official samples clear the timer-safety median and quantization-aware
+  four-quantum IQR gate; target-reached dispersion remains diagnostic, and the
+  cap decision and quality metadata remain machine-readable.
   Browser completion uses real-time DevTools Protocol polling rather than
   Chromium virtual time or `--dump-dom`. The hosted benchmark workflow uploads
   results as artifacts; local Node diagnostics use host Node `22.23.3` when the

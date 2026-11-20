@@ -141,6 +141,10 @@
   flush, binding-dispatch, native-host, and teardown phases at 1/10/100/1000
   bindings, with bounded calibration, operation counts, integrity metadata,
   JSON output, and Markdown summaries.
+- [x] Added bounded M3.5 repetition floors for the fastest browser workloads
+  and made the result validator accept the conventional pnpm `--` separator;
+  measured operation counts remain explicit and strict integrity validation is
+  unchanged.
 
 ## In progress / next
 

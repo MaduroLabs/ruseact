@@ -126,6 +126,7 @@ function browserPage(sourceSha, browserVersion, toolchain) {
         ...toolchain,
         user_agent: navigator.userAgent,
         host: navigator.platform,
+        cross_origin_isolated: globalThis.crossOriginIsolated === true,
         timer: "performance.now() converted to nanoseconds",
         timer_resolution_ns: timerResolutionNs,
         wasm_build: "wasm32-unknown-unknown release with wasm-bindgen --target web",
@@ -427,7 +428,15 @@ try {
       response.end("not found");
       return;
     }
-    response.writeHead(200, { "content-type": contentType(requestedFile), "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": contentType(requestedFile),
+      "cache-control": "no-store",
+      // Cross-origin isolation permits Chromium's high-resolution monotonic
+      // timer path for this measurement page. All benchmark resources are
+      // same-origin; the application/runtime semantics are unchanged.
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-embedder-policy": "require-corp",
+    });
     createReadStream(requestedFile).pipe(response);
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

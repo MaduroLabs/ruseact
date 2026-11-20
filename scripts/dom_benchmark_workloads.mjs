@@ -5,7 +5,54 @@ import {
 
 const SIZES = Object.freeze([1, 10, 100, 1000]);
 const UPDATE_CYCLES = 16;
-const UNCHANGED_CYCLES = 64;
+const UNCHANGED_CYCLES = 192;
+
+// The shared M2.5 calibrator is intentionally bounded at 64 batches. These
+// floors and bounded repetition counts apply only to the M3.5 timed workload
+// definitions: they keep the fastest size-1 and size-10 cases measurable
+// without changing the individual DOM or reactive operation semantics. The
+// final calibrated operation count is recorded in every result row.
+function ruseactLifecycleOperations(size) {
+  return size <= 10 ? 128 : 1;
+}
+
+function ruseactMountOperations(size) {
+  if (size === 1) return 1024;
+  if (size === 10) return 256;
+  return 1;
+}
+
+function ruseactUnmountOperations(size) {
+  return size === 10 ? 256 : ruseactLifecycleOperations(size);
+}
+
+function nativeMountOperations(size) {
+  if (size === 1) return 100_000;
+  if (size === 10) return 10_000;
+  return 1;
+}
+
+function nativeTextCycles(size) {
+  if (size === 1) return 512;
+  if (size === 10) return 32;
+  return UPDATE_CYCLES;
+}
+
+function nativeAttributePropertyCycles(size) {
+  return size === 1 ? 128 : UPDATE_CYCLES;
+}
+
+function nativeUnmountOperations(size) {
+  if (size <= 10) return 100_000;
+  if (size === 100) return 10_000;
+  return 5_000;
+}
+
+function nativeLifecycleOperations(size) {
+  if (size <= 10) return 10_000;
+  if (size === 100) return 2;
+  return 1;
+}
 
 function check(condition, message) {
   if (!condition) throw new Error(`M3.5 benchmark correctness check failed: ${message}`);
@@ -129,7 +176,45 @@ function mountTextFixture(state, rootModule, size, mode, runtime) {
 async function setupMountedText(runtimeModule, rootModule, wasmModule, size, mode) {
   const runtime = await makeRuntime(runtimeModule, wasmModule);
   const state = { runtime, container: document.createElement("main") };
-  return mountTextFixture(state, rootModule, size, mode, runtime);
+  try {
+    return mountTextFixture(state, rootModule, size, mode, runtime);
+  } catch (error) {
+    cleanupRuseact(state);
+    throw error;
+  }
+}
+
+async function setupEmptyRootBatch(runtimeModule, wasmModule, size, repetitions) {
+  const fixtures = [];
+  try {
+    for (let index = 0; index < repetitions; index += 1) {
+      fixtures.push({
+        runtime: await makeRuntime(runtimeModule, wasmModule),
+        container: document.createElement("main"),
+      });
+    }
+    return { fixtures, size };
+  } catch (error) {
+    for (const fixture of fixtures.reverse()) disposeRuntime(fixture);
+    throw error;
+  }
+}
+
+async function setupMountedTextBatch(runtimeModule, rootModule, wasmModule, size, repetitions) {
+  const fixtures = [];
+  try {
+    for (let index = 0; index < repetitions; index += 1) {
+      fixtures.push(await setupMountedText(runtimeModule, rootModule, wasmModule, size, "shared"));
+    }
+    return { fixtures, size };
+  } catch (error) {
+    for (const fixture of fixtures.reverse()) cleanupRuseact(fixture);
+    throw error;
+  }
+}
+
+function cleanupRuseactBatch(state) {
+  for (const fixture of state.fixtures.reverse()) cleanupRuseact(fixture);
 }
 
 async function setupAttributeProperty(runtimeModule, rootModule, wasmModule, size) {
@@ -267,32 +352,43 @@ async function measureWorkload(clock, descriptor, setup, operation, cleanup, val
 
 async function ruseactRows(results, clock, runtimeModule, rootModule, wasmModule) {
   for (const size of SIZES) {
+    const staticOptions = {
+      signalCount: 0,
+      computationCount: 0,
+      bindingCount: 0,
+      dependencyEdges: 0,
+      affectedComputations: 0,
+      pendingComputations: 0,
+    };
     const textOptions = { signalCount: 1, computationCount: size, bindingCount: size, dependencyEdges: size, affectedComputations: size, pendingComputations: size };
     results.push(await measureWorkload(clock, {
       layer: "typescript-runtime",
       operation: "root_mount",
       size,
       graph_size: size,
-      timed_operations: 1,
-      setup_operations: 1,
+      timed_operations: ruseactMountOperations(size),
+      setup_operations: ruseactMountOperations(size),
       cleanup: "dispose mounted root and runtime",
-      m35: ruseactMetadata(size, "mount", "root-mount-cycle", { ...textOptions, timedDescription: "create root and mount a static subtree with size text nodes" }),
+      m35: ruseactMetadata(size, "mount", "root-mount-cycle", {
+        ...staticOptions,
+        setupDescription: `create ${ruseactMountOperations(size)} detached containers and dedicated runtimes outside the timed mount operations`,
+        timedDescription: "create root and mount a static subtree with size text nodes",
+      }),
     },
-    () => setupEmptyRoot(runtimeModule, wasmModule),
+    () => setupEmptyRootBatch(runtimeModule, wasmModule, size, ruseactMountOperations(size)),
     (state) => {
-      const root = unwrap(rootModule.createRootContext(state.container, state.runtime), "create timed root");
-      const mounted = root.mount((scope) => {
-        mountStatic(scope, size);
-        return success(undefined);
-      });
-      unwrap(mounted, "timed root mount");
-      state.root = root;
-      return 1;
+      for (const fixture of state.fixtures) {
+        const root = unwrap(rootModule.createRootContext(fixture.container, fixture.runtime), "create timed root");
+        unwrap(root.mount((scope) => {
+          mountStatic(scope, size);
+          return success(undefined);
+        }), "timed root mount");
+        fixture.root = root;
+      }
+      return state.fixtures.length;
     },
-    cleanupRuseact,
-    (observed, state) => {
-      check(observed === 1 && state.container.childNodes.length === 1, "root mount result");
-    }));
+    cleanupRuseactBatch,
+    (observed, state) => check(observed === state.fixtures.length && state.fixtures.every((fixture) => fixture.container.childNodes.length === 1), "root mount result")));
 
     results.push(await measureWorkload(clock, {
       layer: "typescript-runtime",
@@ -382,14 +478,14 @@ async function ruseactRows(results, clock, runtimeModule, rootModule, wasmModule
       operation: "independent_signal_bindings",
       size,
       graph_size: size,
-      timed_operations: Math.max(1, Math.min(UPDATE_CYCLES, 8)),
+      timed_operations: 32,
       setup_operations: size,
       cleanup: "dispose mounted root and runtime",
       m35: ruseactMetadata(size, "targeted-dom-mutation", "independent-signal-flush-cycle", { signalCount: size, timedDescription: `update ${size} independent bindings in one flush` }),
     },
     () => setupMountedText(runtimeModule, rootModule, wasmModule, size, "independent"),
     (state) => {
-      const cycles = Math.max(1, Math.min(UPDATE_CYCLES, 8));
+      const cycles = 32;
       for (let cycle = 1; cycle <= cycles; cycle += 1) {
         for (const signal of state.signals) unwrap(state.runtime.set(signal, cycle), "independent signal write");
         check(unwrap(state.root.flush(), "independent flush").executedCount === size, "independent execution count");
@@ -426,43 +522,55 @@ async function ruseactRows(results, clock, runtimeModule, rootModule, wasmModule
       operation: "root_unmount_cleanup",
       size,
       graph_size: size,
-      timed_operations: 1,
-      setup_operations: size,
+      timed_operations: ruseactUnmountOperations(size),
+      setup_operations: ruseactUnmountOperations(size) * size,
       cleanup: "dispose unmounted root and runtime",
-      m35: ruseactMetadata(size, "teardown", "root-unmount-cycle", { ...textOptions, affectedComputations: size, pendingComputations: 0, timedDescription: `unmount and clean up a root with ${size} bound nodes` }),
+      m35: ruseactMetadata(size, "teardown", "root-unmount-cycle", {
+        ...textOptions,
+        setupDescription: `create and mount ${ruseactUnmountOperations(size)} bound roots outside the timed unmount operations`,
+        affectedComputations: size,
+        pendingComputations: 0,
+        timedDescription: `unmount ${ruseactUnmountOperations(size)} roots with ${size} bound nodes each`,
+      }),
     },
-    () => setupMountedText(runtimeModule, rootModule, wasmModule, size, "shared"),
+    () => setupMountedTextBatch(runtimeModule, rootModule, wasmModule, size, ruseactUnmountOperations(size)),
     (state) => {
-      unwrap(state.root.unmount(), "timed root unmount");
-      return 1;
+      for (const fixture of state.fixtures) unwrap(fixture.root.unmount(), "timed root unmount");
+      return state.fixtures.length;
     },
-    cleanupRuseact,
-    (observed, state) => check(observed === 1 && state.container.childNodes.length === 0, "root unmount validation")));
+    cleanupRuseactBatch,
+    (observed, state) => check(observed === state.fixtures.length && state.fixtures.every((fixture) => fixture.container.childNodes.length === 0), "root unmount validation")));
 
     results.push(await measureWorkload(clock, {
       layer: "typescript-runtime",
       operation: "root_lifecycle_cycle",
       size,
       graph_size: size,
-      timed_operations: 1,
+      timed_operations: ruseactLifecycleOperations(size),
       setup_operations: 1,
       cleanup: "dispose runtime after cycle",
-      m35: ruseactMetadata(size, "lifecycle", "create-mount-unmount-dispose-cycle", { ...textOptions, timedDescription: `create, mount, unmount, and dispose a ${size}-node root` }),
+      m35: ruseactMetadata(size, "lifecycle", "create-mount-unmount-dispose-cycle", {
+        ...staticOptions,
+        setupDescription: "create one detached container and dedicated runtime outside the timed lifecycle cycles",
+        timedDescription: `create, mount, unmount, and dispose ${ruseactLifecycleOperations(size)} ${size}-node root cycles`,
+      }),
     },
     () => setupEmptyRoot(runtimeModule, wasmModule),
     (state) => {
-      const root = unwrap(rootModule.createRootContext(state.container, state.runtime), "lifecycle root creation");
-      unwrap(root.mount((scope) => {
-        mountStatic(scope, size);
-        return success(undefined);
-      }), "lifecycle root mount");
-      unwrap(root.unmount(), "lifecycle root unmount");
-      unwrap(root.dispose(), "lifecycle root dispose");
-      state.root = undefined;
-      return 1;
+      const cycles = ruseactLifecycleOperations(size);
+      for (let cycle = 0; cycle < cycles; cycle += 1) {
+        const root = unwrap(rootModule.createRootContext(state.container, state.runtime), "lifecycle root creation");
+        unwrap(root.mount((scope) => {
+          mountStatic(scope, size);
+          return success(undefined);
+        }), "lifecycle root mount");
+        unwrap(root.unmount(), "lifecycle root unmount");
+        unwrap(root.dispose(), "lifecycle root dispose");
+      }
+      return cycles;
     },
     cleanupRuseact,
-    (observed, state) => check(observed === 1 && state.container.childNodes.length === 0, "lifecycle validation")));
+    (observed, state) => check(observed === ruseactLifecycleOperations(size) && state.container.childNodes.length === 0, "lifecycle validation")));
   }
 }
 
@@ -473,102 +581,114 @@ async function nativeRows(results, clock) {
       operation: "native_dom_mount",
       size,
       graph_size: size,
-      timed_operations: 1,
+      timed_operations: nativeMountOperations(size),
       setup_operations: 1,
       cleanup: "remove native subtree",
-      m35: nativeMetadata(size, "mount-reference", "native-mount-cycle", "create and append a static subtree"),
+      m35: nativeMetadata(size, "mount-reference", "native-mount-cycle", `create and append ${nativeMountOperations(size)} static subtrees`),
     },
     () => setupNative(null, null, size, "mount"),
     (state) => {
-      state.section = document.createElement("section");
-      for (let index = 0; index < size; index += 1) state.section.appendChild(document.createTextNode(`static:${index}`));
-      state.container.appendChild(state.section);
-      return 1;
+      const operations = nativeMountOperations(size);
+      state.sections = [];
+      for (let cycle = 0; cycle < operations; cycle += 1) {
+        const section = document.createElement("section");
+        for (let index = 0; index < size; index += 1) section.appendChild(document.createTextNode(`static:${index}`));
+        state.sections.push(section);
+        state.container.appendChild(section);
+      }
+      return operations;
     },
     cleanupNative,
-    (observed, state) => check(observed === 1 && state.container.firstChild === state.section, "native mount validation")));
+    (observed, state) => check(observed === nativeMountOperations(size) && state.container.childNodes.length === nativeMountOperations(size) && state.container.firstChild === state.sections[0], "native mount validation")));
 
     results.push(await measureWorkload(clock, {
       layer: "native-dom",
       operation: "native_dom_text_update",
       size,
       graph_size: size,
-      timed_operations: UPDATE_CYCLES * size,
+      timed_operations: nativeTextCycles(size) * size,
       setup_operations: size,
       cleanup: "remove native text nodes",
-      m35: nativeMetadata(size, "host-mutation-reference", "text-node-write", `write ${size} text nodes for ${UPDATE_CYCLES} cycles`),
+      m35: nativeMetadata(size, "host-mutation-reference", "text-node-write", `write ${size} text nodes for ${nativeTextCycles(size)} cycles`),
     },
     () => setupNative(null, null, size, "text"),
     (state) => {
-      for (let cycle = 1; cycle <= UPDATE_CYCLES; cycle += 1) {
+      for (let cycle = 1; cycle <= nativeTextCycles(size); cycle += 1) {
         for (const node of state.nodes) node.nodeValue = `value:${cycle}`;
       }
-      return UPDATE_CYCLES * size;
+      return nativeTextCycles(size) * size;
     },
     cleanupNative,
-    (observed, state) => check(observed === UPDATE_CYCLES * size && state.nodes.every((node) => node.nodeValue === `value:${UPDATE_CYCLES}`), "native text validation")));
+    (observed, state) => check(observed === nativeTextCycles(size) * size && state.nodes.every((node) => node.nodeValue === `value:${nativeTextCycles(size)}`), "native text validation")));
 
     results.push(await measureWorkload(clock, {
       layer: "native-dom",
       operation: "native_dom_attribute_property",
       size,
       graph_size: size,
-      timed_operations: UPDATE_CYCLES * size * 2,
+      timed_operations: nativeAttributePropertyCycles(size) * size * 2,
       setup_operations: size * 2,
       cleanup: "remove native attribute/property nodes",
-      m35: nativeMetadata(size, "host-mutation-reference", "attribute-plus-property-write", `write ${size} attributes and ${size} properties for ${UPDATE_CYCLES} cycles`),
+      m35: nativeMetadata(size, "host-mutation-reference", "attribute-plus-property-write", `write ${size} attributes and ${size} properties for ${nativeAttributePropertyCycles(size)} cycles`),
     },
     () => setupNative(null, null, size, "attribute-property"),
     (state) => {
-      for (let cycle = 1; cycle <= UPDATE_CYCLES; cycle += 1) {
+      for (let cycle = 1; cycle <= nativeAttributePropertyCycles(size); cycle += 1) {
         for (let index = 0; index < size; index += 1) {
           state.buttons[index].setAttribute("aria-label", `label-${cycle}`);
           state.inputs[index].disabled = cycle % 2 === 0;
         }
       }
-      return UPDATE_CYCLES * size * 2;
+      return nativeAttributePropertyCycles(size) * size * 2;
     },
     cleanupNative,
-    (observed, state) => check(observed === UPDATE_CYCLES * size * 2 && state.buttons.every((node) => node.getAttribute("aria-label") === `label-${UPDATE_CYCLES}`) && state.inputs.every((node) => node.disabled === true), "native attribute/property validation")));
+    (observed, state) => check(observed === nativeAttributePropertyCycles(size) * size * 2 && state.buttons.every((node) => node.getAttribute("aria-label") === `label-${nativeAttributePropertyCycles(size)}`) && state.inputs.every((node) => node.disabled === true), "native attribute/property validation")));
 
     results.push(await measureWorkload(clock, {
       layer: "native-dom",
       operation: "native_dom_unmount",
       size,
       graph_size: size,
-      timed_operations: 1,
+      timed_operations: nativeUnmountOperations(size),
       setup_operations: size,
       cleanup: "remove native container",
-      m35: nativeMetadata(size, "teardown-reference", "native-unmount-cycle", "remove an already-mounted native subtree"),
+      m35: nativeMetadata(size, "teardown-reference", "native-unmount-remove", "repeat removal of an already-mounted native subtree, reattaching between timed removals"),
     },
     () => setupNative(null, null, size, "unmount"),
     (state) => {
-      state.container.removeChild(state.section);
-      return 1;
+      const operations = nativeUnmountOperations(size);
+      for (let index = 0; index < operations; index += 1) {
+        state.container.removeChild(state.section);
+        if (index + 1 < operations) state.container.appendChild(state.section);
+      }
+      return operations;
     },
     cleanupNative,
-    (observed, state) => check(observed === 1 && state.container.childNodes.length === 0, "native unmount validation")));
+    (observed, state) => check(observed === nativeUnmountOperations(size) && state.container.childNodes.length === 0, "native unmount validation")));
 
     results.push(await measureWorkload(clock, {
       layer: "native-dom",
       operation: "native_dom_lifecycle_cycle",
       size,
       graph_size: size,
-      timed_operations: 1,
+      timed_operations: nativeLifecycleOperations(size),
       setup_operations: 1,
       cleanup: "remove native lifecycle nodes",
       m35: nativeMetadata(size, "lifecycle-reference", "native-lifecycle-cycle", "create, append, and remove a native subtree"),
     },
     () => setupNative(null, null, size, "lifecycle"),
     (state) => {
-      const section = document.createElement("section");
-      for (let index = 0; index < size; index += 1) section.appendChild(document.createTextNode(`static:${index}`));
-      state.container.appendChild(section);
-      state.container.removeChild(section);
-      return 1;
+      const operations = nativeLifecycleOperations(size);
+      for (let cycle = 0; cycle < operations; cycle += 1) {
+        const section = document.createElement("section");
+        for (let index = 0; index < size; index += 1) section.appendChild(document.createTextNode(`static:${index}`));
+        state.container.appendChild(section);
+        state.container.removeChild(section);
+      }
+      return operations;
     },
     cleanupNative,
-    (observed, state) => check(observed === 1 && state.container.childNodes.length === 0, "native lifecycle validation")));
+    (observed, state) => check(observed === nativeLifecycleOperations(size) && state.container.childNodes.length === 0, "native lifecycle validation")));
   }
 }
 

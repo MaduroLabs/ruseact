@@ -46,6 +46,7 @@ export function validateReport(report, filePath = "report") {
   check(report.benchmark === "m3.5-dom-e2e", `${filePath}: benchmark name`);
   check(typeof report.metadata?.source_sha === "string" && report.metadata.source_sha.length > 0, `${filePath}: source SHA`);
   check(typeof report.metadata?.browser === "string" && report.metadata.browser.length > 0, `${filePath}: browser metadata`);
+  check(report.metadata?.cross_origin_isolated === true, `${filePath}: cross-origin-isolated benchmark page`);
   for (const field of ["node_version", "pnpm_version", "rust_version", "typescript_version", "wasm_bindgen_version"]) {
     check(typeof report.metadata?.[field] === "string" && report.metadata[field].length > 0, `${filePath}: ${field} metadata`);
   }
@@ -121,7 +122,11 @@ export function validateReport(report, filePath = "report") {
   return report;
 }
 
-const files = process.argv.slice(2);
+// pnpm forwards the conventional argument separator when a script is invoked
+// as `pnpm <script> -- <file>`. Accept it here just as the existing M2.5
+// validator does, while still requiring every actual argument to be a result
+// file.
+const files = process.argv.slice(2).filter((value) => value !== "--");
 if (files.length === 0) throw new Error("usage: validate_dom_benchmark_results.mjs <result.json> [...]");
 for (const filePath of files) {
   const report = JSON.parse(readFileSync(filePath, "utf8"));

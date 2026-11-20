@@ -75,6 +75,25 @@ for (const filePath of paths) {
       check(Number.isFinite(row.calibration_target_ns) && row.calibration_target_ns > 0, `${filePath} row ${index}: calibration target`);
       check(Array.isArray(row.calibration_samples_ns) && row.calibration_samples_ns.length > 0, `${filePath} row ${index}: calibration samples`);
       check(row.calibration_samples_ns.every((value) => Number.isFinite(value) && value >= 0), `${filePath} row ${index}: calibration sample values`);
+      check(Number.isInteger(row.recalibration_count) && row.recalibration_count >= 0, `${filePath} row ${index}: recalibration count`);
+      check(Array.isArray(row.calibration_attempts) && row.calibration_attempts.length > 0, `${filePath} row ${index}: calibration attempts`);
+      check(Array.isArray(row.measurement_attempts) && row.measurement_attempts.length > 0, `${filePath} row ${index}: measurement attempts`);
+      check(row.recalibration_count === row.measurement_attempts.length - 1, `${filePath} row ${index}: recalibration count matches attempts`);
+      check(row.calibration_attempts.length === row.measurement_attempts.length, `${filePath} row ${index}: calibration/measurement attempts`);
+      for (const [attemptIndex, attempt] of row.measurement_attempts.entries()) {
+        check(attempt.attempt === attemptIndex + 1, `${filePath} row ${index}: attempt sequence`);
+        check(Number.isInteger(attempt.timed_operations) && attempt.timed_operations > 0, `${filePath} row ${index}: attempt timed operations`);
+        check(Array.isArray(attempt.samples_ns) && attempt.samples_ns.length === row.trials, `${filePath} row ${index}: attempt samples`);
+        check(attempt.samples_ns.every((value) => Number.isFinite(value) && value >= 0), `${filePath} row ${index}: attempt sample values`);
+        check(attempt.failure_reason === null || typeof attempt.failure_reason === "string", `${filePath} row ${index}: attempt failure reason`);
+        const calibrationAttempt = row.calibration_attempts[attemptIndex];
+        check(calibrationAttempt.attempt === attempt.attempt, `${filePath} row ${index}: calibration attempt sequence`);
+        check(calibrationAttempt.timed_operations === attempt.timed_operations, `${filePath} row ${index}: calibration attempt operations`);
+        check(Array.isArray(calibrationAttempt.calibration_samples_ns), `${filePath} row ${index}: calibration attempt samples`);
+      }
+      const finalAttempt = row.measurement_attempts[row.measurement_attempts.length - 1];
+      check(finalAttempt.timed_operations === row.timed_operations, `${filePath} row ${index}: final attempt operations`);
+      check(finalAttempt.samples_ns.length === row.samples_ns.length && finalAttempt.samples_ns.every((value, sampleIndex) => value === row.samples_ns[sampleIndex]), `${filePath} row ${index}: final attempt samples`);
     }
     check(Number.isFinite(row.median_ns) && Number.isFinite(row.p95_ns), `${filePath} row ${index}: summary values`);
     check(row.p95_ns === nearestRank(row.samples_ns, 0.95), `${filePath} row ${index}: p95 calculation`);

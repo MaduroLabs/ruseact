@@ -261,14 +261,24 @@ Protocol completion signal and real `performance.now()`; virtual-time and
 `--dump-dom` completion are not used for performance measurements. Zero-median
 or non-finite rows fail the benchmark integrity gate rather than being treated
 as zero-cost operations. Short workloads first calibrate from their existing
-operation counts against the measured browser timer resolution, using bounded
-independent prepared states and recording the resulting operation count.
+operation counts against the measured browser timer resolution, using a
+conservative minimum 2 ms target and bounded independent prepared states. If
+an official trial still contains a zero or non-finite sample, the complete
+warmup/trial attempt is discarded and retried with at least twice the batch
+size, up to three attempts. Every attempt and resulting operation count is
+recorded; the strict validator still rejects an unresolved final attempt.
 
 Run the manually reproducible Node benchmark after building matching bindings:
 
 ```bash
 RUSEACT_WASM_BINDGEN_OUT="$PWD/target/m2.5-node-bindgen" \
 corepack pnpm benchmark:node
+```
+
+Run the dependency-free deterministic calibration regression tests with:
+
+```bash
+corepack pnpm test:benchmark:calibration
 ```
 
 The authoritative Node and real-Chromium run is the manually dispatched

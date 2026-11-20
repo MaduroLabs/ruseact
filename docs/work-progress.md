@@ -4,8 +4,8 @@
 
 - Branch: `feature/m3.3-reactive-dom-bindings`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `99fdb406b07cc50cdf0e8f056818b71aa6db7eaa`
-- Last verified on: Linux x86_64, 2026-11-19 for M3.3 binding implementation;
+- Baseline: `origin/develop` at `20ac8a1af817d8596ad9f070f60aa34d4901c642`
+- Last verified on: Linux x86_64, 2026-11-20 for M3.3 binding integration;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
@@ -86,10 +86,17 @@
   browser timer-resolution metadata, calibrated short workloads, and fail-closed
   result-integrity checks for unresolved rows.
 - [x] Added bounded adaptive per-workload calibration: prepared independent
-  states are measured before official trials, expanded only up to eight states
-  toward the timer-resolution target, with 64 prepared states and a 50 ms
-  calibration-sample bound; diagnostic artifacts upload even when
-  the integrity gate fails.
+  states are measured before official trials toward a conservative
+  `max(2 ms, 16 * timer_resolution)` target, with 64 prepared states and a
+  50 ms calibration-sample bound. Official zero/non-finite samples trigger a
+  complete warmup/trial retry at least twice as large, capped at three
+  attempts; discarded attempts and operation counts remain in diagnostics.
+- [x] Added dependency-free deterministic calibration regression tests for
+  quantized timers, intermittent zero samples, bounded retries, limit
+  exhaustion, operation-count reporting, and reproducibility.
+- [x] Stabilized intermittent Chromium benchmark samples with a conservative
+  2 ms timer target and bounded whole-attempt recalibration; no benchmark
+  operation definitions or runtime semantics changed.
 - [x] Inspected the implemented M2 RustReactiveCore, WASM bridge, TypeScript
   runtime, browser harness, and empty DOM package boundary for M3.1.
 - [x] Drafted the documentation-only M3.1 DOM renderer architecture covering

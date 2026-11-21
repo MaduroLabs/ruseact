@@ -23,9 +23,9 @@ Ruseact explores a different separation of responsibilities:
 - **Rust:** Reactive graph, signal identity, dependency management, and future
   scheduling.
 - **TypeScript/JavaScript:** Component execution and browser-facing integration.
-- **DOM adapter:** Internal M3.2 host operations, M3.3 explicit bindings, and
-  the M3.4 root lifecycle prototype are implemented; public rendering
-  contracts remain deferred.
+- **DOM adapter:** Native M3.2 host operations, M3.3 explicit bindings, the
+  M3.4 root lifecycle, and the approved M4.2 public renderer MVP are
+  implemented; compiler and structural rendering remain deferred.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -51,11 +51,12 @@ API compatibility is claimed.
 | M3.3 — Reactive DOM bindings | Internal explicit binding prototype complete; no public renderer API |
 | M3.4 — Root mount and lifecycle | Internal root lifecycle prototype complete; no public renderer API |
 | M3.5 — End-to-end DOM integration and benchmark | Complete; hosted Chromium correctness and benchmark integrity passed |
-| M4.1 — Public renderer and compiler contract design | Design-only; public contracts require human approval |
+| M4.1 — Public renderer and compiler contract design | Complete; M4.2 subset approved |
+| M4.2 — Public renderer MVP | Implemented; hosted Chromium verification pending |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
-| DOM renderer               | M3.1 design approved; M3.2–M3.5 internal path complete; public contract deferred |
-| Compiler integration       | M4.1 contract design proposed; compiler implementation not started |
+| DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
+| Compiler integration       | M4.1 contract design approved for M4.2 handoff; compiler implementation not started |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
 ### Currently implemented
@@ -118,13 +119,18 @@ The Rust reactive core supports:
   binding flush, and teardown phases separately; it does not add scheduling or
   a public renderer API.
 
-M4.1 adds no executable renderer or compiler. Its design proposes a small
-public root façade over the internal lifecycle, compiler-assisted static
-templates with fine-grained binding slots, and a versioned compiler-to-runtime
-contract. The proposal keeps explicit flush, borrowed runtime ownership, and
-dedicated-runtime isolation as the baseline. Component identity, structural
-regions, automatic dependency tracking, scheduling, JSX transformation, and
-the final public API remain unapproved.
+- An M4.2 public `ruseact-dom` façade with `createRoot(container, runtime)`;
+  typed `RendererRoot` lifecycle operations; immutable static mount plans;
+  stable local node IDs; scalar text, supported attribute/property, and native
+  listener slots; explicit signal dependencies; structured renderer results;
+  one-shot mount semantics; and delegation to the existing M3.2–M3.4
+  ownership, binding, and cleanup pipeline.
+
+M4.1 defined the renderer/compiler contract and the project owner approved the
+narrow M4.2 subset. M4.2 implements the public root façade over the internal
+lifecycle, static mount plans, explicit binding slots, structured results, and
+manual flush. Component identity, structural regions, automatic dependency
+tracking, scheduling, JSX transformation, and compiler output remain deferred.
 
 Rust computation execution, automatic dependency tracking, and scheduling are
 not implemented. M3.3 and M3.4 execute explicitly registered JavaScript
@@ -145,8 +151,8 @@ execution, automatic dependency tracking, scheduling, or a public DOM API.
   scalar and reactive-identity ABI.
 - `packages/ruseact` — TypeScript runtime bridge and future JSX/compiler
   interface.
-- `packages/ruseact-dom` — Browser host adapter, binding, and internal root
-  lifecycle boundary; public renderer contracts remain deferred.
+- `packages/ruseact-dom` — Browser host adapter, explicit bindings, internal
+  root lifecycle, and the M4.2 public renderer façade.
 - `docs` — Architecture decisions and technical documentation.
 
 The [M2.1 WASM ABI design](docs/wasm-abi-design.md) records the reviewed
@@ -248,8 +254,9 @@ instances because the existing pending queue is global and destructive.
 The hosted browser command is `corepack pnpm test:browser:root`. It exercises
 real WASM, host operations, binding updates, explicit flush, event cleanup,
 rollback, detachment, duplicate containers, runtime isolation, unmount, and
-container reuse. The package entry point remains empty, and public view,
-component, compiler, scheduler, and renderer API decisions remain future
+container reuse. This section describes the internal M3.4 boundary; the
+package entry point now additionally exposes the approved M4.2 façade, while
+component, compiler, scheduler, and structural renderer behavior remain future
 work.
 
 ## M3.5 end-to-end DOM integration and benchmark
@@ -310,10 +317,44 @@ objects in Rust, or infer that arbitrary identifiers are signals.
 
 The architecture design compares public API, view, component, dependency,
 structural, and scheduling alternatives and proposes M4.2–M4.5 implementation
-boundaries.
-All public renderer, compiler, component, keyed-list, and scheduling choices
-remain subject to human architecture approval. See
+boundaries. The M4.2 subset of the façade, static mount plan, explicit
+dependency model, one-shot lifecycle, structured results, and manual flush was
+subsequently approved and implemented. Compiler, component, keyed-list, and
+automatic scheduling choices remain deferred. See
 [docs/m4-public-renderer-compiler-design.md](docs/m4-public-renderer-compiler-design.md).
+
+## M4.2 public renderer MVP
+
+M4.2 exports the first public DOM façade from `ruseact-dom`:
+
+```ts
+const rootResult = createRoot(container, runtime);
+if (rootResult.ok) {
+  const root = rootResult.value;
+  root.mount(view);
+  root.flush();
+  root.unmount();
+  root.dispose();
+}
+```
+
+The public view is a one-shot immutable mount plan with stable node IDs,
+explicit parent references, static HTML elements/text, supported attributes and
+properties, native listeners, and scalar binding slots. Binding evaluators
+receive the borrowed `ReactiveCore`; dependencies are supplied explicitly and
+updates occur only during an explicit `root.flush()`.
+
+`RendererResult<T>` preserves the existing structured `CoreResult` shape with
+typed diagnostics. The root borrows the supplied runtime and container, owns
+only renderer-created resources, never clears unrelated container children, and
+requires a dedicated runtime for each active mounted root because pending
+draining remains global and destructive. Mount is one-shot: there is no
+`update(view)`, automatic scheduling, structural reconciliation, JSX compiler,
+component runtime, or React API compatibility claim.
+
+The hosted browser command is `corepack pnpm test:browser:public`. InstaBox
+cannot reliably route Chromium to its temporary loopback server, so hosted
+GitHub Chromium remains authoritative for public renderer correctness.
 
 ## Development
 

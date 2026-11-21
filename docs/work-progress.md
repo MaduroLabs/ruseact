@@ -2,12 +2,12 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.1-renderer-compiler-design`
+- Branch: `feature/m4.2-public-renderer`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `7b4080235a54c16c087a023962fede2c5d856b86`
-- Last verified on: Linux x86_64, 2026-11-21 for M4.1 public renderer and
-  compiler contract design; M3.5 hosted browser correctness and benchmark
-  integrity passed before this documentation-only branch;
+- Baseline: `origin/develop` at `f745b8fa5c57200ef14e4498fcf62987c98dacb0`
+- Last verified on: Linux x86_64, 2026-11-21 for M4.2 public renderer MVP;
+  M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
+  integrity passed before this implementation branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
@@ -151,6 +151,18 @@
   renderer façade, view representation, compiler IR, component model,
   dependency strategy, structural regions, scheduling boundary, ownership
   restrictions, open decisions, and M4.2–M4.5 roadmap.
+- [x] Implemented the approved M4.2 public `ruseact-dom` renderer façade with
+  structured `RendererResult` diagnostics, one-shot `RendererRoot` lifecycle,
+  immutable versioned static mount plans, stable node IDs, explicit binding
+  slots, supported attributes/properties, and native listener instructions.
+- [x] Delegated public mounting, flushing, unmounting, and disposal to the
+  existing M3.2 host, M3.3 binding, and M3.4 root contexts without adding a
+  second lifecycle engine, reactive graph, scheduler, or ownership registry.
+- [x] Added the real-WASM Chromium public renderer harness covering Hello
+  World, reactive counter behavior, explicit flush, plan validation, rollback,
+  listener cleanup, one-shot mount, borrowed-resource survival, and container
+  reuse. Hosted Chromium remains authoritative because InstaBox cannot route
+  Chromium to its temporary loopback server.
 
 ## In progress / next
 
@@ -177,11 +189,13 @@
   the public renderer/view lifecycle remains deferred and shared-runtime
   binding managers remain unsupported.
 - [x] Define the candidate public renderer/view lifecycle and compiler
-  integration contract in M4.1; all public contracts remain pending human
-  architecture approval before M4.2 implementation.
-- [ ] Obtain human approval for the M4.1 public façade, view/IR version,
-  dependency semantics, component identity, structural regions, and scheduling
-  policy before starting M4.2.
+  integration contract in M4.1; the narrow M4.2 subset was then approved for
+  implementation.
+- [x] Obtain approval for the M4.2 façade, static mount plan, dependency,
+  one-shot lifecycle, structured-result, and manual-flush subset; compiler,
+  component, structural, and scheduling extensions remain deferred.
+- [ ] Run hosted Chromium public-renderer verification and obtain human review
+  of the M4.2 implementation PR before any promotion.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -324,6 +338,11 @@
   classification. No runtime, compiler, package-export, WASM, or browser test
   changes were made. The repository pin is Node `24.22.3`; this box's active
   Node is `22.23.3`, while the TypeScript check completed successfully.
+- M4.2 local validation — TypeScript typecheck, public browser harness syntax,
+  release WASM build, matching `wasm-bindgen-cli 0.2.130` generation, and
+  `git diff --check` pass on Linux x86_64. The public Chromium harness reached
+  the known InstaBox `listen EPERM` loopback restriction; no local browser pass
+  is claimed and hosted GitHub Chromium remains authoritative.
 
 ## Blockers / decisions
 

@@ -708,3 +708,46 @@ future microtask or frame scheduler would require a separate decision about
 signal-write notification, event ordering, errors, reentrancy, and shared
 runtime isolation. The M4.1 design and proposed M4.2–M4.5 roadmap are
 recorded in [docs/m4-public-renderer-compiler-design.md](m4-public-renderer-compiler-design.md).
+
+## Decision 26: M4.2 implements the approved public renderer MVP
+
+M4.2 implements the explicitly approved subset of the M4.1 design in
+`packages/ruseact-dom/src/renderer.ts` and re-exports it from the package
+boundary. The public `createRoot(container, runtime)` function returns a
+structured `RendererResult`; the returned `RendererRoot` exposes typed
+`state`, `mount(view)`, `flush()`, `unmount()`, and `dispose()` operations.
+The façade delegates to the existing M3.4 `RootContext` and does not duplicate
+root ownership, DOM host operations, or binding execution.
+
+The public view contract is an immutable one-shot `ViewDescription` with the
+`ruseact.template` protocol, version `1`, a template identity, and an
+`instantiate({ runtime })` function. The resulting `ViewInstancePlan` contains
+static element/text nodes with stable local IDs and explicit parent references,
+native listener instructions, and scalar text/attribute/property binding slots.
+The executor validates IDs, parent relationships, cycles, supported HTML
+namespace and property operations, target kinds, duplicate slots, explicit
+dependencies, and listener metadata before applying the plan through the
+existing staged-subtree mount scope. It creates nodes once and never compares
+or reconciles mutable view trees.
+
+Binding evaluators remain JavaScript-owned. They receive the borrowed
+`ReactiveCore`, return the existing structured result shape, and use explicit
+signal dependencies. `root.flush()` delegates to the M3.3 one-snapshot FIFO
+flush: queue deduplication, reentrancy rejection, deferred work, unknown
+pending failure, and the global destructive-drain limitation are unchanged.
+No automatic tracking, microtask or frame scheduler, recursive drain, or
+priority lane is introduced.
+
+The root borrows the runtime and container and owns only renderer-created
+nodes, listener registrations, binding computations, and subscriptions. The
+existing one-shot lifecycle and fail-closed cleanup behavior remain in force;
+successful unmount permits a new root to claim the container, while the old
+root cannot remount. Application signals and the borrowed runtime are never
+disposed by the renderer. Each active mounted root still requires a dedicated
+ReactiveCore under the current global pending-drain contract.
+
+M4.2 does not implement JSX/TSX compilation, components, structural regions,
+keyed lists, `update(view)`, automatic scheduling, a virtual DOM, React Fiber,
+or React API compatibility. Compiler output and future structural contracts
+remain subject to the M4.3/M4.4 approvals described in
+`docs/m4-public-renderer-compiler-design.md`.

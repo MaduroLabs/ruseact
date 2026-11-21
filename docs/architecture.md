@@ -635,3 +635,36 @@ mount rollback, foreign-node rejection, detached targets, unmount, disposal,
 borrowed-resource survival, and container reuse. This internal prototype does
 not establish public component, compiler, scheduler, keyed-list, hydration,
 or React-compatible lifecycle semantics.
+
+## Decision 24: M3.5 validates the existing internal DOM path without extending it
+
+M3.5 adds test-only end-to-end browser coverage and a separate benchmark
+harness. The correctness path uses the existing generated Rust/WASM module,
+TypeScript `ReactiveCore`, internal M3.4 root context, M3.3 explicit bindings,
+and M3.2 native host operations. It verifies the actual transition from a
+signal write through dirty propagation and explicit pending-work flush to a
+targeted DOM mutation. No second reactive engine, public root API, scheduler,
+automatic dependency tracking, compiler, or WASM ABI change is introduced.
+
+The benchmark separates initial mount, no-op writes, changed writes with an
+explicit flush, multi-write flushes, fan-out, independent bindings,
+attribute/property updates, and teardown. Setup, timed operations,
+validation, and cleanup are distinct. Workloads are bounded at 1, 10, 100,
+and 1000 bindings and use the established M2.5 adaptive calibration and
+integrity rules: warmup, bounded retries, actual operation counts, finite
+positive samples, timer-aware acceptance, and explicit unresolved diagnostics.
+The benchmark records medians and distribution metadata; it does not impose
+performance pass thresholds or make cross-machine speed claims.
+
+A direct native-DOM reference repeats comparable element, text,
+attribute/property, and lifecycle mutations. It is a host-operation baseline
+only: it has no Rust graph, WASM bridge, binding lookup, explicit flush, or
+root ownership semantics. Its values must not be presented as a comparison
+against Ruseact or another framework.
+
+The M3.5 browser harness runs in hosted Chromium because the current InstaBox
+cannot reliably route Chromium to its temporary loopback HTTP server. Browser
+artifacts record the commit, browser, Node, Rust, wasm-bindgen, workload,
+calibration, and integrity metadata. Public view descriptors, components,
+compiler output, scheduling, and future renderer API decisions remain outside
+this validation milestone.

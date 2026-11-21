@@ -14,10 +14,13 @@
     "test:browser:dom": "node scripts/test_browser_dom.mjs",
     "test:browser:bindings": "node scripts/test_browser_bindings.mjs",
     "test:browser:root": "node scripts/test_browser_root.mjs",
+    "test:browser:e2e": "node scripts/test_browser_e2e.mjs",
     "test:benchmark:calibration": "node scripts/test_benchmark_calibration.mjs",
     "benchmark:node": "node scripts/benchmark_wasm_bridge.mjs",
     "benchmark:browser": "node scripts/benchmark_browser_runtime.mjs",
-    "benchmark:validate": "node scripts/validate_benchmark_results.mjs"
+    "benchmark:validate": "node scripts/validate_benchmark_results.mjs",
+    "benchmark:browser:dom": "node scripts/benchmark_dom_e2e.mjs",
+    "benchmark:dom:validate": "node scripts/validate_dom_benchmark_results.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"

@@ -2,10 +2,12 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m3.4-root-lifecycle`
+- Branch: `feature/m3.5-dom-e2e-benchmark`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `304e4aed2ec7ed42982688c531445b801e3cbc64`
-- Last verified on: Linux x86_64, 2026-11-20 for M3.4 root lifecycle;
+- Baseline: `origin/develop` at `095923fe7a77ab8e2f96899a725292f7c46d217f`
+- Last verified on: Linux x86_64, 2026-11-20 for M3.5 end-to-end DOM
+  integration and benchmark implementation; hosted browser validation remains
+  authoritative and pending on the feature PR;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
@@ -131,6 +133,18 @@
   reactive mount, batching, FIFO ordering, reentrancy, event cleanup, duplicate
   containers, runtime isolation, rollback, detached targets, disposal, and
   container reuse.
+- [x] Added the M3.5 real-WASM Chromium end-to-end harness covering the
+  imperative counter interaction, explicit flush boundaries, batching,
+  ordering, stable DOM identity, event cleanup, rollback, runtime isolation,
+  ownership failures, and container reuse.
+- [x] Added the M3.5 browser benchmark harness for separate mount, write,
+  flush, binding-dispatch, native-host, and teardown phases at 1/10/100/1000
+  bindings, with bounded calibration, operation counts, integrity metadata,
+  JSON output, and Markdown summaries.
+- [x] Added bounded M3.5 repetition floors for the fastest browser workloads
+  and made the result validator accept the conventional pnpm `--` separator;
+  measured operation counts remain explicit and strict integrity validation is
+  unchanged.
 
 ## In progress / next
 
@@ -156,8 +170,8 @@
 - [x] Define and implement the approved internal M3.4 root/lifecycle boundary;
   the public renderer/view lifecycle remains deferred and shared-runtime
   binding managers remain unsupported.
-- [ ] Define the separately approved public renderer/view lifecycle, compiler
-  integration, and M3.5 testing/benchmark handoff.
+- [ ] Define the separately approved public renderer/view lifecycle and
+  compiler integration; M3.5 provides the internal testing/benchmark handoff.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -361,3 +375,8 @@
   resources, and requires a dedicated runtime per active binding context. A
   cleanup failure enters a fail-closed state and retains the container claim;
   no recovery protocol or new ABI was added.
+- M3.5 adds real-WASM Chromium end-to-end correctness and performance
+  harnesses. The browser path is authoritative only in hosted CI because the
+  InstaBox loopback browser limitation prevents claiming local Chromium
+  execution. Numeric benchmark results remain CI artifacts until the hosted
+  workflow completes; no values are fabricated in this progress record.

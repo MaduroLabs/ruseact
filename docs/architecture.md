@@ -668,3 +668,43 @@ artifacts record the commit, browser, Node, Rust, wasm-bindgen, workload,
 calibration, and integrity metadata. Public view descriptors, components,
 compiler output, scheduling, and future renderer API decisions remain outside
 this validation milestone.
+
+## Decision 25: M4.1 defines a public renderer/compiler contract without implementing it
+
+M4.1 is documentation-only. It starts from the verified M3.5 runtime and
+defines candidate public renderer, view, component, structural-region, and
+compiler-output contracts. No candidate in the design is an approved public
+signature, and no package export, compiler transform, scheduler, WASM export,
+Rust change, or example application is added by this milestone.
+
+The recommended direction is a small public façade over the internal M3.4
+root lifecycle. The candidate façade accepts a borrowed `ReactiveCore`,
+mounts one static view plan, provides explicit one-snapshot `flush`, and
+supports deterministic unmount and permanent disposal. M4.2 should not add
+`update(view)` until structural identity is defined. A second active mounted
+root continues to require a dedicated runtime because the M3.3 pending drain
+is global and destructive.
+
+The proposed view direction is a hybrid: compiler-assisted static templates
+with stable fine-grained binding slots as the primary path, plus a narrow
+imperative/descriptor fallback that lowers to the same internal mount plan.
+The design intentionally does not introduce a virtual DOM or a global diff.
+Static nodes, text/attribute/property operations, JavaScript listener
+closures, explicit dependencies, source locations, and future region anchors
+are represented as versioned metadata. Generated JavaScript resolves actual
+signal handles and retains lexical closures; the compiler never constructs
+opaque WASM handles, stores DOM objects in Rust, or classifies arbitrary
+identifiers as reactive.
+
+The first component recommendation is a conservative hybrid: one-time
+component setup with targeted binding updates, followed by separately approved
+anchored conditional and keyed-list regions. Component identity is a
+JavaScript renderer concept and must not be conflated with a Rust computation
+identity. Hooks-like state, automatic dependency tracking, unkeyed list
+semantics, hydration, and React API compatibility remain deferred.
+
+Manual explicit flush remains the only supported scheduling semantics. A
+future microtask or frame scheduler would require a separate decision about
+signal-write notification, event ordering, errors, reentrancy, and shared
+runtime isolation. The M4.1 design and proposed M4.2–M4.5 roadmap are
+recorded in [docs/m4-public-renderer-compiler-design.md](m4-public-renderer-compiler-design.md).

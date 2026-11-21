@@ -50,9 +50,10 @@ API compatibility is claimed.
 | M3.2 — DOM host operations | Complete; hosted Chromium validation passed |
 | M3.3 — Reactive DOM bindings | Internal explicit binding prototype complete; no public renderer API |
 | M3.4 — Root mount and lifecycle | Internal root lifecycle prototype complete; no public renderer API |
+| M3.5 — End-to-end DOM integration and benchmark | In progress; hosted Chromium correctness and benchmark validation pending |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
-| DOM renderer               | M3.1 design approved; M3.2 host and M3.3 binding internals complete |
+| DOM renderer               | M3.1 design approved; M3.2–M3.4 internals complete; M3.5 validation in progress |
 | Compiler integration       | Not implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
@@ -110,6 +111,11 @@ The Rust reactive core supports:
   calls, public TypeScript runtime calls, and real Chromium execution. It
   records deterministic 16/64/256-signal workloads, raw samples, summaries,
   correctness checks, and structured artifacts without changing runtime APIs.
+- An M3.5 test-only end-to-end harness that drives the real Rust/WASM runtime
+  through the internal root and binding contexts into native Chromium DOM
+  mutations. Its benchmark workloads measure explicit mount, signal update,
+  binding flush, and teardown phases separately; it does not add scheduling or
+  a public renderer API.
 
 Rust computation execution, automatic dependency tracking, and scheduling are
 not implemented. M3.3 and M3.4 execute explicitly registered JavaScript
@@ -130,7 +136,8 @@ execution, automatic dependency tracking, scheduling, or a public DOM API.
   scalar and reactive-identity ABI.
 - `packages/ruseact` — TypeScript runtime bridge and future JSX/compiler
   interface.
-- `packages/ruseact-dom` — Browser host adapter boundary; M3.1 is design-only.
+- `packages/ruseact-dom` — Browser host adapter, binding, and internal root
+  lifecycle boundary; public renderer contracts remain deferred.
 - `docs` — Architecture decisions and technical documentation.
 
 The [M2.1 WASM ABI design](docs/wasm-abi-design.md) records the reviewed
@@ -235,6 +242,47 @@ rollback, detachment, duplicate containers, runtime isolation, unmount, and
 container reuse. The package entry point remains empty, and public view,
 component, compiler, scheduler, and renderer API decisions remain future
 work.
+
+## M3.5 end-to-end DOM integration and benchmark
+
+M3.5 validates the complete internal path:
+
+```text
+signal write → RustReactiveCore dirty propagation → WASM bridge →
+TypeScript computation resolution → explicit binding execution → native DOM mutation
+```
+
+The real-browser correctness command is:
+
+```bash
+corepack pnpm test:browser:e2e
+```
+
+It initializes the actual generated WASM module, mounts a small imperative
+counter fixture, dispatches native events, verifies explicit `root.flush()`
+behavior, and checks cleanup, ownership, runtime isolation, and container
+reuse. Updates are intentionally manual: M3.5 does not add a scheduler,
+automatic dependency tracking, or a public `createRoot()` API.
+
+The separate browser benchmark uses bounded workload sizes of 1, 10, 100, and
+1000 bindings:
+
+```bash
+corepack pnpm benchmark:browser:dom
+corepack pnpm benchmark:dom:validate -- target/m3.5-results/dom-results.json
+```
+
+Mount, unchanged write, changed write plus flush, multi-write flush, binding
+fan-out, independent bindings, attribute/property updates, and root cleanup
+are reported as separate phases. A small native DOM implementation runs the
+same host mutation shapes as a reference for DOM host work only. It does not
+include RustReactiveCore, WASM, binding dispatch, or renderer lifecycle work,
+so it is not a framework comparison. The harness uses warmups, bounded
+adaptive calibration, positive finite samples, actual operation counts, and
+strict machine-readable integrity checks. Hosted Chromium is authoritative;
+the InstaBox localhost browser limitation means local browser execution is
+not reported as a pass. Numeric results are published as CI artifacts and
+summarized in [the M3.5 benchmark report](docs/benchmarks/m3.5-dom-e2e-baseline.md).
 
 ## Development
 

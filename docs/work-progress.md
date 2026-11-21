@@ -2,12 +2,12 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m3.5-dom-e2e-benchmark`
+- Branch: `feature/m4.1-renderer-compiler-design`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `095923fe7a77ab8e2f96899a725292f7c46d217f`
-- Last verified on: Linux x86_64, 2026-11-20 for M3.5 end-to-end DOM
-  integration and benchmark implementation; hosted browser validation remains
-  authoritative and pending on the feature PR;
+- Baseline: `origin/develop` at `7b4080235a54c16c087a023962fede2c5d856b86`
+- Last verified on: Linux x86_64, 2026-11-21 for M4.1 public renderer and
+  compiler contract design; M3.5 hosted browser correctness and benchmark
+  integrity passed before this documentation-only branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
 
 ## Completed
@@ -145,6 +145,12 @@
   and made the result validator accept the conventional pnpm `--` separator;
   measured operation counts remain explicit and strict integrity validation is
   unchanged.
+- [x] Completed M3.5 through PR #44 into `develop` and promotion PR #45 into
+  `main`; hosted Chromium correctness and M2.5/M3.5 benchmark integrity passed.
+- [x] Audited the verified M3 runtime and documented the M4.1 candidate public
+  renderer façade, view representation, compiler IR, component model,
+  dependency strategy, structural regions, scheduling boundary, ownership
+  restrictions, open decisions, and M4.2–M4.5 roadmap.
 
 ## In progress / next
 
@@ -170,8 +176,12 @@
 - [x] Define and implement the approved internal M3.4 root/lifecycle boundary;
   the public renderer/view lifecycle remains deferred and shared-runtime
   binding managers remain unsupported.
-- [ ] Define the separately approved public renderer/view lifecycle and
-  compiler integration; M3.5 provides the internal testing/benchmark handoff.
+- [x] Define the candidate public renderer/view lifecycle and compiler
+  integration contract in M4.1; all public contracts remain pending human
+  architecture approval before M4.2 implementation.
+- [ ] Obtain human approval for the M4.1 public façade, view/IR version,
+  dependency semantics, component identity, structural regions, and scheduling
+  policy before starting M4.2.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
@@ -307,6 +317,13 @@
   loopback server in this InstaBox (`listen EPERM`); hosted GitHub Chromium is
   authoritative. Full Rust, package, policy, and hosted browser results are
   recorded after the feature PR workflow completes.
+- M4.1 design-only validation — PASS on Linux x86_64: `cargo fmt --all --
+  --check`, workspace Clippy, workspace tests (35 core and 10 WASM tests), the
+  wasm32 workspace check, `corepack pnpm typecheck`, `git diff --check`, README
+  validation, skill validation, workflow policy, automation-gate, and LOW risk
+  classification. No runtime, compiler, package-export, WASM, or browser test
+  changes were made. The repository pin is Node `24.22.3`; this box's active
+  Node is `22.23.3`, while the TypeScript check completed successfully.
 
 ## Blockers / decisions
 

@@ -982,3 +982,28 @@ natural future producer of those binding records, while a small explicit
 fallback can make the first implementation testable. The design remains
 deliberately incomplete where computation execution, dependency tracking,
 scheduling, components, and compiler semantics have not yet been approved.
+
+## 23. M3.5 end-to-end validation boundary
+
+M3.5 exercises the approved internal prototype without finalizing any of the
+unresolved public renderer decisions in this document. Its browser fixture
+uses an imperative root mount, explicit signal dependencies, manual
+`root.flush()`, and the existing native host operations. The correctness
+assertions cover the real Rust/WASM-to-TypeScript-to-binding-to-DOM path,
+native event interaction, ownership failures, runtime isolation, unmount, and
+container reuse.
+
+The companion benchmark is a validation harness rather than a renderer
+competition. It measures mount, explicit update/flush, targeted host mutation,
+and cleanup phases independently at bounded binding counts. A direct DOM
+reference covers only comparable native mutation shapes. Neither harness
+introduces scheduling, automatic tracking, components, JSX, a public root
+API, or a view descriptor.
+
+Hosted Chromium remains the authoritative browser environment. The InstaBox
+loopback limitation prevents treating local browser attempts as proof of
+success. Benchmark rows carry actual operation counts, calibration attempts,
+raw samples, summaries, and integrity state; unresolved measurements remain
+unresolved rather than being converted into performance values. M3.5 hands
+future work the evidence needed for renderer profiling while leaving public
+lifecycle, compiler, component, and scheduling approval decisions open.

@@ -114,6 +114,10 @@ jobs:
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
         run: pnpm test:browser:root
+      - name: Run real Chromium end-to-end DOM tests
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
+        run: pnpm test:browser:e2e
 
   benchmark:
     name: Benchmark (M2.5)
@@ -183,6 +187,29 @@ jobs:
         with:
           name: ruseact-m2.5-benchmark-${{ github.event.pull_request.head.sha }}
           path: target/m2.5-results
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Run real Chromium M3.5 DOM benchmark
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.5-browser-bindgen
+          RUSEACT_BENCHMARK_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          RUSEACT_PNPM_VERSION: 12.16.1
+          RUSEACT_RUST_VERSION: 1.99.0
+          RUSEACT_TYPESCRIPT_VERSION: 5.9.3
+          RUSEACT_WASM_BINDGEN_VERSION: 0.2.130
+          RUSEACT_M35_BENCHMARK_OUT: ${{ github.workspace }}/target/m3.5-results/dom-results.json
+          RUSEACT_M35_BENCHMARK_SUMMARY_OUT: ${{ github.workspace }}/target/m3.5-results/dom-summary.md
+        run: |
+          mkdir -p target/m3.5-results
+          corepack pnpm benchmark:browser:dom
+      - name: Validate M3.5 DOM benchmark results
+        run: corepack pnpm benchmark:dom:validate target/m3.5-results/dom-results.json
+      - name: Upload M3.5 DOM benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruseact-m3.5-dom-benchmark-${{ github.event.pull_request.head.sha }}
+          path: target/m3.5-results
           if-no-files-found: warn
           retention-days: 14
 

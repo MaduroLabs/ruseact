@@ -50,11 +50,12 @@ API compatibility is claimed.
 | M3.2 — DOM host operations | Complete; hosted Chromium validation passed |
 | M3.3 — Reactive DOM bindings | Internal explicit binding prototype complete; no public renderer API |
 | M3.4 — Root mount and lifecycle | Internal root lifecycle prototype complete; no public renderer API |
-| M3.5 — End-to-end DOM integration and benchmark | In progress; hosted Chromium correctness and benchmark validation pending |
+| M3.5 — End-to-end DOM integration and benchmark | Complete; hosted Chromium correctness and benchmark integrity passed |
+| M4.1 — Public renderer and compiler contract design | Design-only; public contracts require human approval |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
-| DOM renderer               | M3.1 design approved; M3.2–M3.4 internals complete; M3.5 validation in progress |
-| Compiler integration       | Not implemented |
+| DOM renderer               | M3.1 design approved; M3.2–M3.5 internal path complete; public contract deferred |
+| Compiler integration       | M4.1 contract design proposed; compiler implementation not started |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
 ### Currently implemented
@@ -116,6 +117,14 @@ The Rust reactive core supports:
   mutations. Its benchmark workloads measure explicit mount, signal update,
   binding flush, and teardown phases separately; it does not add scheduling or
   a public renderer API.
+
+M4.1 adds no executable renderer or compiler. Its design proposes a small
+public root façade over the internal lifecycle, compiler-assisted static
+templates with fine-grained binding slots, and a versioned compiler-to-runtime
+contract. The proposal keeps explicit flush, borrowed runtime ownership, and
+dedicated-runtime isolation as the baseline. Component identity, structural
+regions, automatic dependency tracking, scheduling, JSX transformation, and
+the final public API remain unapproved.
 
 Rust computation execution, automatic dependency tracking, and scheduling are
 not implemented. M3.3 and M3.4 execute explicitly registered JavaScript
@@ -283,6 +292,28 @@ strict machine-readable integrity checks. Hosted Chromium is authoritative;
 the InstaBox localhost browser limitation means local browser execution is
 not reported as a pass. Numeric results are published as CI artifacts and
 summarized in [the M3.5 benchmark report](docs/benchmarks/m3.5-dom-e2e-baseline.md).
+
+## M4.1 public renderer and compiler contract design
+
+M4.1 is documentation-only. The candidate public API is a façade resembling
+`createRoot(container, runtime)` with explicit `mount`, `flush`, `unmount`,
+and `dispose` operations. This is not exported or executable yet. The
+recommended view direction is a hybrid whose primary path is compiler-assisted
+static DOM templates with stable text/attribute/property binding slots and a
+narrow imperative fallback.
+
+The proposed compiler boundary uses a versioned template IR with stable local
+node and binding IDs, explicit operation kinds, dependency metadata, source
+locations, and future structural anchors. It must preserve JavaScript lexical
+scope and evaluation order and must never construct WASM handles, store DOM
+objects in Rust, or infer that arbitrary identifiers are signals.
+
+The architecture design compares public API, view, component, dependency,
+structural, and scheduling alternatives and proposes M4.2–M4.5 implementation
+boundaries.
+All public renderer, compiler, component, keyed-list, and scheduling choices
+remain subject to human architecture approval. See
+[docs/m4-public-renderer-compiler-design.md](docs/m4-public-renderer-compiler-design.md).
 
 ## Development
 

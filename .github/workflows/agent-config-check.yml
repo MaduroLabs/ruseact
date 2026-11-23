@@ -114,6 +114,10 @@ jobs:
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
         run: pnpm test:browser:root
+      - name: Run real Chromium public renderer tests
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
+        run: pnpm test:browser:public
       - name: Run real Chromium end-to-end DOM tests
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen

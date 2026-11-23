@@ -751,3 +751,41 @@ keyed lists, `update(view)`, automatic scheduling, a virtual DOM, React Fiber,
 or React API compatibility. Compiler output and future structural contracts
 remain subject to the M4.3/M4.4 approvals described in
 `docs/m4-public-renderer-compiler-design.md`.
+
+## Decision 27: M4.3 implements a private JSX/TSX compiler MVP
+
+M4.3 adds `packages/ruseact-compiler/src/index.ts`, an internal transform that
+uses the repository-pinned TypeScript Compiler API in TSX mode. It emits ESM
+whose JSX expressions produce the implemented M4.2 `ViewDescription` protocol
+and version `1`; it does not introduce another renderer or a new renderer
+protocol. The compiler package is private and is not exported from the public
+`ruseact` or `ruseact-dom` entry points.
+
+The supported subset is lowercase HTML intrinsic elements, static text and
+string attributes, the existing `value`/`checked`/`disabled` property
+contract, native event closures, and explicit scalar binding slots. Generated
+node, binding, listener, and template IDs are deterministic local metadata.
+Generated evaluators retain JavaScript lexical closures and read signal values
+at execution time; signal handles are captured as JavaScript values and are
+never serialized or constructed by the compiler.
+
+Because M2–M4.2 provide only explicit dependency registration, M4.3 uses the
+provisional compiler-only markers `ruseact.bindText`, `bindAttribute`, and
+`bindProperty`. Each marker requires a non-empty array of explicit signal
+references and an evaluator that returns a structured runtime result. These
+markers are not public runtime APIs and do not establish implicit dependency
+inference. A dynamic JSX value without a marker is rejected with a
+source-located diagnostic.
+
+The compiler rejects components, fragments, conditional structure, lists,
+spreads, unsupported namespaces/properties, implicit dependencies, hooks, and
+React-specific syntax. It uses AST nodes and TypeScript's printer/transpiler;
+it does not use regex parsing, `eval`, `Function`, a JSX runtime, or string
+execution. Browser fixtures compile Hello World and a counter and then use the
+real M4.2 public renderer and Rust/WASM runtime. Hosted Chromium remains the
+authoritative browser environment.
+
+M4.3 does not add automatic tracking, scheduling, component execution,
+structural reconciliation, a WASM ABI change, or a public compiler API. M4.4
+must separately approve any component, conditional-region, keyed-list, or
+dynamic-dependency contract.

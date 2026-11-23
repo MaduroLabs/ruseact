@@ -64,6 +64,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: TypeScript checks
         run: pnpm typecheck
+      - name: Compiler unit and snapshot checks
+        run: pnpm test:compiler
 
   browser:
     name: Browser (chromium)
@@ -118,6 +120,10 @@ jobs:
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
         run: pnpm test:browser:public
+      - name: Run real Chromium compiled JSX tests
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
+        run: pnpm test:browser:compiler
       - name: Run real Chromium end-to-end DOM tests
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen

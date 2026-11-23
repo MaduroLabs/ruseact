@@ -1038,3 +1038,28 @@ microtask/frame scheduling, priority lanes, a virtual DOM, or React Fiber.
 The M3.3 dedicated-runtime restriction and destructive pending-drain contract
 remain part of the public MVP's documented limitations. M4.3 must define and
 obtain approval for compiler output before generating plans automatically.
+
+## 21. M4.3 compiler MVP implementation
+
+M4.3 implements the narrow compiler direction needed by the approved M4.2
+contract. The private `packages/ruseact-compiler` module parses TSX with the
+TypeScript Compiler API and emits executable ESM containing `ViewDescription`
+version 1 objects. It uses AST traversal and TypeScript emission rather than
+regex parsing, `eval`, `Function`, or a JSX runtime.
+
+The implemented syntax is lowercase HTML intrinsic JSX with static text,
+static string attributes, `value`/`checked`/`disabled`, native event closures,
+and explicit text/attribute/property binding slots. The compiler-only markers
+`ruseact.bindText`, `ruseact.bindAttribute`, and `ruseact.bindProperty` require
+explicit signal-reference arrays and structured-result evaluator closures.
+They preserve lexical captures and read current signal values when the public
+renderer executes a binding. They are provisional source syntax, not new
+public runtime exports.
+
+Generated templates have deterministic local node, slot, listener, and
+template IDs and source metadata. Unsupported components, fragments,
+conditional/list structure, spreads, unsupported namespaces/properties, and
+implicit dependencies produce source-located compile diagnostics. The real
+browser fixture compiles Hello World and a Counter and runs the generated
+modules through M4.2 and Rust/WASM; component and structural semantics remain
+the M4.4 handoff.

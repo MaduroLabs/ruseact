@@ -24,8 +24,9 @@ Ruseact explores a different separation of responsibilities:
   scheduling.
 - **TypeScript/JavaScript:** Component execution and browser-facing integration.
 - **DOM adapter:** Native M3.2 host operations, M3.3 explicit bindings, the
-  M3.4 root lifecycle, and the approved M4.2 public renderer MVP are
-  implemented; compiler and structural rendering remain deferred.
+  M3.4 root lifecycle, the approved M4.2 public renderer MVP, and the narrow
+  M4.3 JSX/TSX compiler MVP are implemented; components and structural
+  rendering remain deferred.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -52,11 +53,12 @@ API compatibility is claimed.
 | M3.4 — Root mount and lifecycle | Internal root lifecycle prototype complete; no public renderer API |
 | M3.5 — End-to-end DOM integration and benchmark | Complete; hosted Chromium correctness and benchmark integrity passed |
 | M4.1 — Public renderer and compiler contract design | Complete; M4.2 subset approved |
-| M4.2 — Public renderer MVP | Implemented; hosted Chromium verification pending |
+| M4.2 — Public renderer MVP | Complete; hosted Chromium verification passed |
+| M4.3 — JSX/TSX compiler MVP | Implemented; hosted Chromium verification pending |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
-| Compiler integration       | M4.1 contract design approved for M4.2 handoff; compiler implementation not started |
+| Compiler integration       | M4.3 narrow TSX-to-ViewDescription transform implemented; components and structural syntax deferred |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
 ### Currently implemented
@@ -126,11 +128,23 @@ The Rust reactive core supports:
   one-shot mount semantics; and delegation to the existing M3.2–M3.4
   ownership, binding, and cleanup pipeline.
 
+- An internal M4.3 compiler module in `packages/ruseact-compiler` that parses
+  a deliberately limited TSX subset with the TypeScript Compiler API and emits
+  executable ESM compatible with `ViewDescription` version 1. It generates
+  deterministic static node and slot IDs, preserves JavaScript closures and
+  event handlers, requires explicit compiler-only dependency markers, and
+  reports source-located diagnostics for unsupported syntax. It does not infer
+  signals, add a JSX runtime, implement components, or perform structural
+  reconciliation.
+
 M4.1 defined the renderer/compiler contract and the project owner approved the
 narrow M4.2 subset. M4.2 implements the public root façade over the internal
 lifecycle, static mount plans, explicit binding slots, structured results, and
-manual flush. Component identity, structural regions, automatic dependency
-tracking, scheduling, JSX transformation, and compiler output remain deferred.
+manual flush. M4.3 now adds only the compiler transform needed to emit that
+existing version-1 plan; its explicit `ruseact.bindText`, `bindAttribute`, and
+`bindProperty` markers are provisional compiler input, not public runtime APIs.
+Component identity, structural regions, automatic dependency tracking, and
+scheduling remain deferred.
 
 Rust computation execution, automatic dependency tracking, and scheduling are
 not implemented. M3.3 and M3.4 execute explicitly registered JavaScript
@@ -149,8 +163,10 @@ execution, automatic dependency tracking, scheduling, or a public DOM API.
 - `crates/ruseact-core` — Platform-independent Rust reactive core.
 - `crates/ruseact-wasm` — Rust-to-JavaScript WASM bridge for the approved M2.2
   scalar and reactive-identity ABI.
-- `packages/ruseact` — TypeScript runtime bridge and future JSX/compiler
-  interface.
+- `packages/ruseact` — TypeScript runtime bridge and shared scalar/handle
+  types.
+- `packages/ruseact-compiler` — private TypeScript Compiler API transform for
+  the supported M4.3 TSX subset; it is not a published package.
 - `packages/ruseact-dom` — Browser host adapter, explicit bindings, internal
   root lifecycle, and the M4.2 public renderer façade.
 - `docs` — Architecture decisions and technical documentation.
@@ -355,6 +371,26 @@ component runtime, or React API compatibility claim.
 The hosted browser command is `corepack pnpm test:browser:public`. InstaBox
 cannot reliably route Chromium to its temporary loopback server, so hosted
 GitHub Chromium remains authoritative for public renderer correctness.
+
+## M4.3 JSX/TSX compiler MVP
+
+The internal compiler command is `corepack pnpm test:compiler`. It parses TSX
+with TypeScript 5.9.3, emits ESM containing the existing `ruseact.template`
+version-1 `ViewDescription`, and never uses regex parsing, `eval`, or
+`Function`. Static HTML structure, text, supported properties, native event
+closures, and explicit binding slots are supported. Dynamic JSX values must use
+the provisional compiler-only `ruseact.bindText`, `bindAttribute`, or
+`bindProperty` marker with an explicit signal list; arbitrary identifiers are
+not inferred to be reactive.
+
+The hosted browser command is `corepack pnpm test:browser:compiler`. It builds
+the real Rust/WASM bindings, executes generated modules in Chromium through
+the public renderer, and verifies compiled Hello World and Counter fixtures.
+The compiler currently rejects components, fragments, conditional structure,
+lists, spreads, unsupported namespaces, implicit dependencies, hooks, and
+React-specific syntax. See
+[docs/m4-jsx-compiler.md](docs/m4-jsx-compiler.md) for the generated module
+contract and M4.4 handoff.
 
 ## Development
 

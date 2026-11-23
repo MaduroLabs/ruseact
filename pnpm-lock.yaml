@@ -172,6 +172,8 @@ importers:
 
   packages/ruseact: {}
 
+  packages/ruseact-compiler: {}
+
   packages/ruseact-dom:
     dependencies:
       ruseact:

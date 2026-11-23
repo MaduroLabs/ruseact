@@ -2,10 +2,10 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.2-public-renderer`
+- Branch: `feature/m4.3-jsx-compiler`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `f745b8fa5c57200ef14e4498fcf62987c98dacb0`
-- Last verified on: Linux x86_64, 2026-11-21 for M4.2 public renderer MVP;
+- Baseline: `origin/develop` at `fe77b8da03801e6c575b1c0b6e8536abf4d3bc81`
+- Last verified on: Linux x86_64, 2026-11-23 for M4.3 JSX/TSX compiler MVP;
   M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
   integrity passed before this implementation branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
@@ -163,6 +163,14 @@
   listener cleanup, one-shot mount, borrowed-resource survival, and container
   reuse. Hosted Chromium remains authoritative because InstaBox cannot route
   Chromium to its temporary loopback server.
+- [x] Implemented the private M4.3 TypeScript Compiler API transform for the
+  supported TSX subset. It emits deterministic M4.2 `ViewDescription` v1
+  plans, explicit compiler-only binding markers, JavaScript event closures,
+  and source-located diagnostics without a JSX runtime, evaluator inference,
+  structural reconciliation, or public compiler export.
+- [x] Added compiler unit/snapshot-style tests and a real-WASM Chromium
+  compiled Hello World and Counter fixture. Hosted browser verification remains
+  the authoritative final check for this branch.
 
 ## In progress / next
 
@@ -194,8 +202,10 @@
 - [x] Obtain approval for the M4.2 façade, static mount plan, dependency,
   one-shot lifecycle, structured-result, and manual-flush subset; compiler,
   component, structural, and scheduling extensions remain deferred.
-- [ ] Run hosted Chromium public-renderer verification and obtain human review
-  of the M4.2 implementation PR before any promotion.
+- [x] Run hosted Chromium public-renderer verification and promote the M4.2
+  implementation through PR #48 into `develop` and PR #49 into `main`.
+- [ ] Obtain human review of the M4.3 compiler implementation PR before any
+  promotion.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.

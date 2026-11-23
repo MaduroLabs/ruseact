@@ -15,6 +15,8 @@
     "test:browser:bindings": "node scripts/test_browser_bindings.mjs",
     "test:browser:root": "node scripts/test_browser_root.mjs",
     "test:browser:public": "node scripts/test_browser_public_renderer.mjs",
+    "test:browser:compiler": "node scripts/test_browser_compiler.mjs",
+    "test:compiler": "node scripts/test_compiler.mjs",
     "test:browser:e2e": "node scripts/test_browser_e2e.mjs",
     "test:benchmark:calibration": "node scripts/test_benchmark_calibration.mjs",
     "benchmark:node": "node scripts/benchmark_wasm_bridge.mjs",

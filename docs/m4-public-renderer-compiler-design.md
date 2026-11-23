@@ -1013,3 +1013,28 @@ The compiler team should not begin M4.3 until M4.2 proves that the public
 façade can consume a plan without leaking private host or binding records. The
 structural team should not begin M4.4 until keyed identity and cleanup are
 approved. Example integration remains outside this repository until M4.5.
+
+## 20. M4.2 approved subset implemented
+
+The project owner approved the following M4.2 subset of this design:
+
+- `ruseact-dom` exports `createRoot(container, runtime)` and typed
+  `RendererRoot` lifecycle operations.
+- `ViewDescription` is an immutable, one-shot `ruseact.template` version 1
+  mount plan with stable local node IDs and explicit parent references.
+- Static HTML elements/text, supported attributes/properties, native listeners,
+  and scalar binding slots are supported.
+- Binding dependencies are explicit signal-handle lists, while JavaScript
+  retains evaluator closures and Rust remains responsible for invalidation.
+- `RendererResult<T>` preserves the `CoreResult` shape and structured
+  diagnostics.
+- The façade delegates to the existing M3.2 host, M3.3 binding, and M3.4 root
+  implementations; it does not create a second ownership registry, reactive
+  graph, or lifecycle engine.
+
+The implementation intentionally does not add `update(view)`, structural
+regions, keyed lists, components, JSX/TSX transformation, automatic tracking,
+microtask/frame scheduling, priority lanes, a virtual DOM, or React Fiber.
+The M3.3 dedicated-runtime restriction and destructive pending-drain contract
+remain part of the public MVP's documented limitations. M4.3 must define and
+obtain approval for compiler output before generating plans automatically.

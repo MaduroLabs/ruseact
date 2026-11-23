@@ -117,13 +117,39 @@ function browserPage() {
       function failure(code, operation, resource, message) {
         return { ok: false, error: { kind: "internal", code, operation, resource, message } };
       }
-      function value(result, name) {
-        check(result !== null && typeof result === "object" && result.ok === true, name);
+      let activeRoot;
+      function resultDetails(result, root) {
+        const candidate = result !== null && typeof result === "object"
+          ? result.error
+          : undefined;
+        const error = candidate !== null && typeof candidate === "object" ? candidate : {};
+        return JSON.stringify({
+          kind: typeof error.kind === "string" ? error.kind : null,
+          code: typeof error.code === "string" ? error.code : null,
+          operation: typeof error.operation === "string" ? error.operation : null,
+          resource: typeof error.resource === "string" ? error.resource : null,
+          message: typeof error.message === "string" ? error.message : null,
+          rootState: root?.state ?? activeRoot?.state ?? null,
+        });
+      }
+      function value(result, name, root) {
+        if (result === null || typeof result !== "object" || result.ok !== true) {
+          throw new Error("check failed: " + name + "; result=" + resultDetails(result, root));
+        }
+        check(true, name);
         return result.value;
       }
-      function expectError(result, code, name) {
-        check(result !== null && typeof result === "object" && result.ok === false, name + ": result");
-        check(result.error.code === code, name + ": " + code);
+      function expectError(result, code, name, root) {
+        if (result === null || typeof result !== "object" || result.ok !== false) {
+          throw new Error("check failed: " + name + ": result=" + resultDetails(result, root));
+        }
+        check(true, name + ": result");
+        if (result.error === null || typeof result.error !== "object" || result.error.code !== code) {
+          throw new Error(
+            "check failed: " + name + ": expected " + code + "; result=" + resultDetails(result, root),
+          );
+        }
+        check(true, name + ": " + code);
       }
 
       const staticView = {
@@ -172,6 +198,7 @@ function browserPage() {
         helloContainer.appendChild(unrelated);
         document.body.appendChild(helloContainer);
         const helloRoot = value(domModule.createRoot(helloContainer, runtime), "public root creation");
+        activeRoot = helloRoot;
         check(helloRoot.state === "created", "public root starts in created state");
         expectError(domModule.createRoot(helloContainer, runtime), "duplicate_root", "duplicate root is rejected");
         value(helloRoot.mount(staticView), "static Hello World mount");
@@ -258,6 +285,7 @@ function browserPage() {
         counterContainer.appendChild(counterUnrelated);
         document.body.appendChild(counterContainer);
         const counterRoot = value(domModule.createRoot(counterContainer, runtime), "counter root creation");
+        activeRoot = counterRoot;
         value(counterRoot.mount(counterView), "public counter mount");
         button = counterContainer.querySelector("button");
         countText = counterContainer.querySelector("section")?.firstChild;
@@ -286,9 +314,32 @@ function browserPage() {
         value(counterRoot.flush(), "property binding flush");
         check(input?.disabled === true, "property binding updates native property");
 
+        const sharedContainer = document.createElement("main");
+        document.body.appendChild(sharedContainer);
+        const sharedRoot = value(domModule.createRoot(sharedContainer, runtime), "same-runtime root creation");
+        activeRoot = sharedRoot;
+        expectError(
+          sharedRoot.mount(counterView),
+          "runtime_in_use",
+          "same-runtime root rejection",
+          sharedRoot,
+        );
+        check(sharedRoot.state === "unmounted", "same-runtime failed mount rolls back");
+        value(sharedRoot.dispose(), "same-runtime root disposal", sharedRoot);
+        check(sharedContainer.childNodes.length === 0, "same-runtime failed mount leaves container clean");
+        activeRoot = counterRoot;
+        value(runtime.set(label, "shared-runtime-rejected"), "counter survives shared-runtime rejection");
+        value(counterRoot.flush(), "counter flush after shared-runtime rejection");
+        check(button?.getAttribute("aria-label") === "shared-runtime-rejected", "counter remains functional");
+        document.body.removeChild(sharedContainer);
+
         let reentrantResult;
         let reentrantEnabled = false;
-        const reentrantSignal = value(runtime.createSignal(0), "reentrant signal creation");
+        const reentrantRuntime = value(
+          await runtimeModule.createReactiveCore(() => wasm),
+          "reentrant runtime initializes",
+        );
+        const reentrantSignal = value(reentrantRuntime.createSignal(0), "reentrant signal creation");
         const reentrantView = {
           protocol: "ruseact.template",
           version: 1,
@@ -311,13 +362,30 @@ function browserPage() {
         };
         const reentrantContainer = document.createElement("main");
         document.body.appendChild(reentrantContainer);
-        const reentrantRoot = value(domModule.createRoot(reentrantContainer, runtime), "reentrant root creation");
-        value(reentrantRoot.mount(reentrantView), "reentrant root mount");
+        const reentrantRoot = value(
+          domModule.createRoot(reentrantContainer, reentrantRuntime),
+          "reentrant root creation",
+        );
+        activeRoot = reentrantRoot;
+        value(reentrantRoot.mount(reentrantView), "reentrant root mount", reentrantRoot);
         reentrantEnabled = true;
-        value(runtime.set(reentrantSignal, 1), "reentrant signal write");
-        value(reentrantRoot.flush(), "outer reentrant flush");
-        expectError(reentrantResult, "reentrant_flush", "reentrant flush is rejected");
-        value(reentrantRoot.dispose(), "reentrant root disposal");
+        value(reentrantRuntime.set(reentrantSignal, 1), "reentrant signal write");
+        const reentrantFlush = value(reentrantRoot.flush(), "outer reentrant flush", reentrantRoot);
+        check(reentrantFlush.drainedCount === 1, "outer reentrant flush drains one binding");
+        expectError(reentrantResult, "reentrant_flush", "reentrant flush is rejected", reentrantRoot);
+        value(reentrantRoot.dispose(), "reentrant root disposal", reentrantRoot);
+        value(reentrantRuntime.dispose(), "reentrant runtime disposal");
+
+        activeRoot = counterRoot;
+        value(counterRoot.unmount(), "counter unmount", counterRoot);
+        check(counterRoot.state === "unmounted", "counter root unmounts");
+        const signalBeforeDetachedClick = value(runtime.get(count), "signal before detached click");
+        button.dispatchEvent(new Event("click"));
+        check(value(runtime.get(count), "signal after detached click") === signalBeforeDetachedClick, "unmount removes listener");
+        check(counterContainer.contains(counterUnrelated), "counter unmount preserves unrelated content");
+        check(!counterContainer.querySelector("section"), "counter unmount removes static subtree");
+        value(counterRoot.dispose(), "counter root disposal", counterRoot);
+        value(runtime.get(count), "borrowed signal survives root disposal");
 
         const invalidPlans = [
           ["unsupported_view_version", { ...staticView, version: 2 }],
@@ -345,23 +413,17 @@ function browserPage() {
           const invalidContainer = document.createElement("main");
           document.body.appendChild(invalidContainer);
           const invalidRoot = value(domModule.createRoot(invalidContainer, runtime), "invalid plan root creation");
-          expectError(invalidRoot.mount(invalidView), code, "invalid plan " + code);
+          activeRoot = invalidRoot;
+          expectError(invalidRoot.mount(invalidView), code, "invalid plan " + code, invalidRoot);
           check(invalidRoot.state === "unmounted", "invalid plan " + code + " rolls back");
-          value(invalidRoot.dispose(), "invalid plan " + code + " disposal");
+          value(invalidRoot.dispose(), "invalid plan " + code + " disposal", invalidRoot);
           check(invalidContainer.childNodes.length === 0, "invalid plan " + code + " leaves container clean");
+          document.body.removeChild(invalidContainer);
         }
 
-        value(counterRoot.unmount(), "counter unmount");
-        check(counterRoot.state === "unmounted", "counter root unmounts");
-        const signalBeforeDetachedClick = value(runtime.get(count), "signal before detached click");
-        button.dispatchEvent(new Event("click"));
-        check(value(runtime.get(count), "signal after detached click") === signalBeforeDetachedClick, "unmount removes listener");
-        check(counterContainer.contains(counterUnrelated), "counter unmount preserves unrelated content");
-        check(!counterContainer.querySelector("section"), "counter unmount removes static subtree");
-        value(counterRoot.dispose(), "counter root disposal");
-        value(runtime.get(count), "borrowed signal survives root disposal");
-
+        activeRoot = undefined;
         const reuseRoot = value(domModule.createRoot(counterContainer, runtime), "container reuse root creation");
+        activeRoot = reuseRoot;
         value(reuseRoot.mount(staticView), "container reuse mount");
         value(reuseRoot.dispose(), "container reuse disposal");
         value(runtime.dispose(), "application-owned runtime disposal");

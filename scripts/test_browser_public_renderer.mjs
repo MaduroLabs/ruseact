@@ -415,7 +415,8 @@ function browserPage() {
           const invalidRoot = value(domModule.createRoot(invalidContainer, runtime), "invalid plan root creation");
           activeRoot = invalidRoot;
           expectError(invalidRoot.mount(invalidView), code, "invalid plan " + code, invalidRoot);
-          check(invalidRoot.state === "unmounted", "invalid plan " + code + " rolls back");
+          const expectedState = code === "unsupported_view_version" ? "created" : "unmounted";
+          check(invalidRoot.state === expectedState, "invalid plan " + code + " preserves rollback state");
           value(invalidRoot.dispose(), "invalid plan " + code + " disposal", invalidRoot);
           check(invalidContainer.childNodes.length === 0, "invalid plan " + code + " leaves container clean");
           document.body.removeChild(invalidContainer);

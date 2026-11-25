@@ -187,6 +187,18 @@ function browserPage() {
         expectError(() => context.insertBefore(list, first, unattachedAnchor), "invalid_insertion_anchor", "anchor relationship is validated");
         expectError(() => context.insertBefore(text, first), "invalid_parent", "text cannot be an insertion parent");
 
+        const commentAnchor = context.createAnchor();
+        const anchorText = context.createTextNode("inside anchor range");
+        context.appendChild(root, commentAnchor);
+        context.insertBefore(root, anchorText, commentAnchor);
+        check(commentAnchor.nodeType === Node.COMMENT_NODE && root.lastChild === commentAnchor, "private comment anchor is insertable");
+        expectError(() => context.setText(commentAnchor, "must fail"), "invalid_node", "comment anchor is not a scalar text target");
+        context.removeChild(root, commentAnchor);
+        check(anchorText.parentNode === root, "anchor removal preserves neighboring owned content");
+        expectError(() => context.insertBefore(root, commentAnchor), "detached_node", "detached comment anchor is rejected");
+        const foreignAnchor = foreignContext.createAnchor();
+        expectError(() => context.appendChild(root, foreignAnchor), "foreign_node", "foreign comment anchor is rejected");
+
         const foreignNode = foreignContext.createElement("span");
         expectError(() => context.appendChild(list, foreignNode), "foreign_node", "foreign child is rejected");
         const foreignContainer = document.createElement("div");

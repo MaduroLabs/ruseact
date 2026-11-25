@@ -32,7 +32,10 @@ export type RendererErrorCode =
   | "invalid_property" | "invalid_property_value" | "unsupported_namespace"
   | "invalid_component_type" | "invalid_component_instance" | "duplicate_component_identity"
   | "invalid_component_props" | "invalid_component_plan" | "child_mount_failed"
-  | "child_cleanup_failed" | "foreign_owner";
+  | "child_cleanup_failed" | "foreign_owner" | "invalid_conditional_plan"
+  | "duplicate_region_id" | "invalid_region_parent" | "invalid_region_dependencies"
+  | "invalid_selector_result" | "invalid_branch_factory" | "invalid_anchor"
+  | "invalid_region_range" | "structural_update_failed";
 
 export interface RendererError extends CoreError {
   readonly message?: string;
@@ -158,11 +161,34 @@ export interface ComponentPlacementPlan {
   readonly props?: ComponentProps;
 }
 
+export interface ConditionalBranchEnvironment extends ViewEnvironment {
+  readonly identity: string;
+}
+
+export type ConditionalBranchFactory = (
+  environment: ConditionalBranchEnvironment,
+) => RendererResult<ComponentView>;
+
+export interface ConditionalRegionPlan {
+  readonly kind: "conditional";
+  readonly id: string;
+  readonly parentId?: string;
+  readonly order: number;
+  readonly dependencies: readonly SignalHandle<SupportedScalar>[];
+  readonly evaluate: (context: BindingEvaluationContext) => RendererResult<boolean>;
+  readonly whenTrue: ConditionalBranchFactory;
+  readonly whenFalse: ConditionalBranchFactory;
+}
+
 export interface ViewInstancePlanV2 extends ViewInstancePlan {
   readonly components: readonly ComponentPlacementPlan[];
 }
 
-export type ComponentView = ViewDescription | ViewInstancePlan | ViewInstancePlanV2;
+export interface ViewInstancePlanV3 extends ViewInstancePlanV2 {
+  readonly conditions: readonly ConditionalRegionPlan[];
+}
+
+export type ComponentView = ViewDescription | ViewInstancePlan | ViewInstancePlanV2 | ViewInstancePlanV3;
 
 export interface ComponentDefinition {
   readonly typeId: string;
@@ -196,13 +222,21 @@ export interface ViewDescriptionV2 {
   readonly instantiate: (environment: ViewEnvironment) => ViewInstancePlanV2;
 }
 
-export type ViewDescription = ViewDescriptionV1 | ViewDescriptionV2;
+export interface ViewDescriptionV3 {
+  readonly protocol: "ruseact.template";
+  readonly version: 3;
+  readonly templateId: string;
+  readonly instantiate: (environment: ViewEnvironment) => ViewInstancePlanV3;
+}
+
+export type ViewDescription = ViewDescriptionV1 | ViewDescriptionV2 | ViewDescriptionV3;
 
 interface PlanValidation {
-  readonly version: 1 | 2;
-  readonly plan: ViewInstancePlan | ViewInstancePlanV2;
+  readonly version: 1 | 2 | 3;
+  readonly plan: ViewInstancePlan | ViewInstancePlanV2 | ViewInstancePlanV3;
   readonly nodesById: ReadonlyMap<string, StaticNodePlan>;
   readonly componentsById: ReadonlyMap<string, ComponentPlacementPlan>;
+  readonly conditionsById: ReadonlyMap<string, ConditionalRegionPlan>;
 }
 
 function success<T>(value: T): RendererResult<T> { return { ok: true, value }; }
@@ -263,11 +297,13 @@ function validComponentPropValue(value: unknown): value is ComponentPropValue {
   return value === undefined || typeof value === "boolean" || typeof value === "number" || typeof value === "string" || value instanceof SignalHandle;
 }
 
-function validatePlan(version: 1 | 2, planValue: unknown, operation = "validate_view"): RendererResult<PlanValidation> {
+function validatePlan(version: 1 | 2 | 3, planValue: unknown, operation = "validate_view"): RendererResult<PlanValidation> {
   if (!isObject(planValue)) return failure(rendererError("invalid_view_plan", operation, "view instantiate() must return a plan"));
   const plan = planValue as Partial<ViewInstancePlanV2>;
   if (!Array.isArray(plan.nodes) || !Array.isArray(plan.bindings) || !Array.isArray(plan.listeners)) return failure(rendererError("invalid_view_plan", operation, "view plan arrays are required"));
-  if (version === 2 && !Array.isArray(plan.components)) return failure(rendererError("invalid_component_plan", operation, "version 2 plans require a components array"));
+  if (version >= 2 && !Array.isArray(plan.components)) return failure(rendererError("invalid_component_plan", operation, `version ${version} plans require a components array`));
+  if (version === 3 && !Array.isArray((planValue as Partial<ViewInstancePlanV3>).conditions)) return failure(rendererError("invalid_conditional_plan", operation, "version 3 plans require a conditions array"));
+  if (version < 3 && Array.isArray((planValue as Partial<ViewInstancePlanV3>).conditions) && (planValue as Partial<ViewInstancePlanV3>).conditions!.length > 0) return failure(rendererError("invalid_conditional_plan", operation, "conditional regions require view protocol version 3"));
 
   const nodesById = new Map<string, StaticNodePlan>();
   for (const nodeValue of plan.nodes) {
@@ -355,7 +391,7 @@ function validatePlan(version: 1 | 2, planValue: unknown, operation = "validate_
   }
 
   const componentsById = new Map<string, ComponentPlacementPlan>();
-  if (version === 2) {
+  if (version >= 2) {
     for (const componentValue of plan.components ?? []) {
       const record = asRecord(componentValue);
       if (record === undefined || record.kind !== "component" || !validIdentifier(record.id) || !validOrder(record.order)) return failure(rendererError("invalid_component_plan", operation, "component placement metadata is invalid"));
@@ -375,14 +411,39 @@ function validatePlan(version: 1 | 2, planValue: unknown, operation = "validate_
       componentsById.set(component.id, component);
     }
   }
-  return success({ version, plan: plan as ViewInstancePlan | ViewInstancePlanV2, nodesById, componentsById });
+  const conditionsById = new Map<string, ConditionalRegionPlan>();
+  if (version === 3) {
+    for (const conditionValue of (planValue as Partial<ViewInstancePlanV3>).conditions ?? []) {
+      const record = asRecord(conditionValue);
+      if (record === undefined || record.kind !== "conditional" || !validIdentifier(record.id) || !validOrder(record.order)) {
+        return failure(rendererError("invalid_conditional_plan", operation, "conditional region metadata is invalid"));
+      }
+      const condition = record as unknown as ConditionalRegionPlan;
+      if (conditionsById.has(condition.id) || nodesById.has(condition.id) || componentsById.has(condition.id)) {
+        return failure(rendererError("duplicate_region_id", operation, `conditional region ${condition.id} is duplicated`));
+      }
+      if (condition.parentId !== undefined) {
+        const parent = nodesById.get(condition.parentId);
+        if (parent === undefined) return failure(rendererError("invalid_region_parent", operation, `conditional region ${condition.id} references missing parent ${condition.parentId}`));
+        if (parent.kind !== "element") return failure(rendererError("invalid_region_parent", operation, `conditional region ${condition.id} needs an element parent`));
+      }
+      if (!Array.isArray(condition.dependencies) || condition.dependencies.length !== 1 || !(condition.dependencies[0] instanceof SignalHandle)) {
+        return failure(rendererError("invalid_region_dependencies", operation, `conditional region ${condition.id} requires exactly one explicit signal dependency`));
+      }
+      if (typeof condition.evaluate !== "function" || typeof condition.whenTrue !== "function" || typeof condition.whenFalse !== "function") {
+        return failure(rendererError("invalid_conditional_plan", operation, `conditional region ${condition.id} requires an evaluator and two branch factories`));
+      }
+      conditionsById.set(condition.id, condition);
+    }
+  }
+  return success({ version, plan: plan as ViewInstancePlan | ViewInstancePlanV2 | ViewInstancePlanV3, nodesById, componentsById, conditionsById });
 }
 
 function validateView(view: unknown): RendererResult<ViewDescription> {
   if (!isObject(view)) return failure(rendererError("invalid_view", "mount", "a view description is required"));
   const candidate = view as Partial<ViewDescription>;
   if (candidate.protocol !== "ruseact.template") return failure(rendererError("unsupported_view_protocol", "mount", "unsupported view protocol"));
-  if (candidate.version !== 1 && candidate.version !== 2) return failure(rendererError("unsupported_view_version", "mount", "unsupported view version"));
+  if (candidate.version !== 1 && candidate.version !== 2 && candidate.version !== 3) return failure(rendererError("unsupported_view_version", "mount", "unsupported view version"));
   if (!validIdentifier(candidate.templateId)) return failure(rendererError("invalid_template_id", "mount", "templateId must be non-empty"));
   if (typeof candidate.instantiate !== "function") return failure(rendererError("invalid_view", "mount", "view instantiate() must be a function"));
   return success(candidate as ViewDescription);
@@ -412,7 +473,7 @@ function updateBinding(scope: RootMountScope, runtime: ReactiveCore, plan: Bindi
 
 function isViewDescription(value: unknown): value is ViewDescription {
   const record = asRecord(value);
-  return record?.protocol === "ruseact.template" && (record.version === 1 || record.version === 2) && typeof record.instantiate === "function";
+  return record?.protocol === "ruseact.template" && (record.version === 1 || record.version === 2 || record.version === 3) && typeof record.instantiate === "function";
 }
 
 function componentFailure(code: RendererErrorCode, message: string, cause?: CoreError): RendererError {
@@ -433,17 +494,279 @@ function materializeComponentView(value: unknown, runtime: ReactiveCore): Render
   }
   const record = asRecord(value);
   if (record === undefined || !Array.isArray(record.nodes) || !Array.isArray(record.bindings) || !Array.isArray(record.listeners)) return failure(rendererError("invalid_component_plan", "mount_component", "component setup must return a supported view or plan"));
-  return validatePlan(Array.isArray(record.components) ? 2 : 1, value, "validate_component_plan");
+  return validatePlan(Array.isArray(record.conditions) ? 3 : Array.isArray(record.components) ? 2 : 1, value, "validate_component_plan");
 }
 
-function orderedItems(plan: PlanValidation, parentId: string | undefined): Array<{ readonly order: number; readonly index: number; readonly node?: StaticNodePlan; readonly component?: ComponentPlacementPlan }> {
-  const items: Array<{ order: number; index: number; node?: StaticNodePlan; component?: ComponentPlacementPlan }> = [];
+interface ConditionalRegionRecord {
+  readonly id: string;
+  readonly owner: ComponentOwner;
+  readonly parent: Node;
+  readonly start: Comment;
+  readonly end: Comment;
+  readonly plan: ConditionalRegionPlan;
+  activeSelector: boolean | undefined;
+  activeBranch: ComponentOwner | undefined;
+  activeRoots: readonly Node[];
+  activation: number;
+  state: "initializing" | "active" | "updating" | "empty" | "disposing" | "disposed" | "cleanup_failed";
+}
+
+type OrderedItem = {
+  readonly order: number;
+  readonly index: number;
+  readonly node?: StaticNodePlan;
+  readonly component?: ComponentPlacementPlan;
+  readonly condition?: ConditionalRegionPlan;
+};
+
+function orderedItems(plan: PlanValidation, parentId: string | undefined): OrderedItem[] {
+  const items: Array<{ order: number; index: number; node?: StaticNodePlan; component?: ComponentPlacementPlan; condition?: ConditionalRegionPlan }> = [];
   plan.plan.nodes.forEach((node, index) => { if (node.parentId === parentId) items.push({ order: node.order ?? index, index, node }); });
   for (const [index, component] of Array.from(plan.componentsById.values()).entries()) {
     if (component.parentId === parentId) items.push({ order: component.order, index: plan.plan.nodes.length + index, component });
   }
+  for (const [index, condition] of Array.from(plan.conditionsById.values()).entries()) {
+    if (condition.parentId === parentId) items.push({ order: condition.order, index: plan.plan.nodes.length + plan.componentsById.size + index, condition });
+  }
   items.sort((left, right) => left.order - right.order || left.index - right.index);
   return items;
+}
+
+function removeOwnedNode(scope: RootMountScope, parent: Node, node: Node): CoreResult<void> {
+  try {
+    if (node.parentNode !== parent) {
+      return failure(rendererError("invalid_region_range", "remove_owned_node", "owned node is no longer attached to its expected parent"));
+    }
+    scope.removeChild(parent, node);
+    return success(undefined);
+  } catch (error) {
+    return failure(normalizeThrown(error, "host_mutation_failed", "remove_owned_node"));
+  }
+}
+
+function validateOwnedSubtree(scope: RootMountScope, node: Node): CoreResult<void> {
+  try {
+    scope.assertOwned(node);
+    for (const child of Array.from(node.childNodes)) {
+      const valid = validateOwnedSubtree(scope, child);
+      if (!valid.ok) return valid;
+    }
+    return success(undefined);
+  } catch (error) {
+    return failure(normalizeThrown(error, "invalid_region_range", "validate_region_range"));
+  }
+}
+
+function validateRegionRange(scope: RootMountScope, record: ConditionalRegionRecord): CoreResult<void> {
+  try {
+    scope.assertOwned(record.parent);
+    scope.assertOwned(record.start);
+    scope.assertOwned(record.end);
+    if (record.start.parentNode !== record.parent || record.end.parentNode !== record.parent) {
+      return failure(rendererError("invalid_region_range", "validate_region_range", "conditional anchors do not share their expected parent"));
+    }
+    if ((record.start.compareDocumentPosition(record.end) & Node.DOCUMENT_POSITION_FOLLOWING) === 0) {
+      return failure(rendererError("invalid_region_range", "validate_region_range", "conditional anchors are not ordered"));
+    }
+    for (const root of record.activeRoots) {
+      if (root.parentNode !== record.parent) {
+        return failure(rendererError("invalid_region_range", "validate_region_range", "active branch root moved outside its region"));
+      }
+      const valid = validateOwnedSubtree(scope, root);
+      if (!valid.ok) return valid;
+    }
+    let current = record.start.nextSibling;
+    while (current !== null && current !== record.end) {
+      const valid = validateOwnedSubtree(scope, current);
+      if (!valid.ok) return valid;
+      current = current.nextSibling;
+    }
+    if (current !== record.end) {
+      return failure(rendererError("invalid_region_range", "validate_region_range", "conditional end anchor is unreachable from the start anchor"));
+    }
+    return success(undefined);
+  } catch (error) {
+    return failure(normalizeThrown(error, "invalid_region_range", "validate_region_range"));
+  }
+}
+
+function trackOwnedNode(scope: RootMountScope, owner: ComponentOwner, parent: Node, node: Node): CoreResult<void> {
+  return owner.trackResource(() => removeOwnedNode(scope, parent, node));
+}
+
+function disposeBranch(record: ConditionalRegionRecord): CoreResult<void> {
+  const branch = record.activeBranch;
+  if (branch === undefined) {
+    record.activeRoots = [];
+    return success(undefined);
+  }
+  const disposed = branch.dispose();
+  if (!disposed.ok) return disposed;
+  const released = record.owner.releaseChild(branch);
+  if (!released.ok) return released;
+  record.activeBranch = undefined;
+  record.activeRoots = [];
+  return success(undefined);
+}
+
+function mountBranch(
+  scope: RootMountScope,
+  runtime: ReactiveCore,
+  record: ConditionalRegionRecord,
+  factory: ConditionalBranchFactory,
+  selected: boolean,
+): CoreResult<void> {
+  const localIdentity = `branch:${record.activation}:${selected ? "true" : "false"}`;
+  const child = record.owner.createChild(localIdentity);
+  if (!child.ok) return child;
+  const owner = child.value;
+  let created: RendererResult<ComponentView>;
+  try {
+    created = factory({ runtime, identity: owner.id });
+  } catch (error) {
+    created = failure(rendererError("invalid_branch_factory", "mount_branch", error instanceof Error ? error.message : "branch factory threw"));
+  }
+  if (!isCoreResult(created)) {
+    created = failure(rendererError("invalid_branch_factory", "mount_branch", "branch factory returned a malformed result"));
+  }
+  if (!created.ok) {
+    const cleaned = owner.dispose();
+    if (cleaned.ok) {
+      record.owner.releaseChild(owner);
+      return created;
+    }
+    return failure(rendererError("child_cleanup_failed", "mount_branch", "branch factory failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  const branchPlan = materializeComponentView(created.value, runtime);
+  if (!branchPlan.ok) {
+    const cleaned = owner.dispose();
+    if (cleaned.ok) {
+      record.owner.releaseChild(owner);
+      return failure(rendererError("invalid_branch_factory", "mount_branch", "branch factory returned an invalid view plan", { causeCode: branchPlan.error.code, causeOperation: branchPlan.error.operation }));
+    }
+    return failure(rendererError("child_cleanup_failed", "mount_branch", "branch plan validation failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  const mounted = executePlan(scope, runtime, branchPlan.value, owner, record.parent, record.end);
+  if (!mounted.ok) {
+    const cleaned = owner.dispose();
+    if (cleaned.ok) {
+      record.owner.releaseChild(owner);
+      return failure(rendererError("child_mount_failed", "mount_branch", "branch mount failed", { causeCode: mounted.error.code, causeOperation: mounted.error.operation }));
+    }
+    return failure(rendererError("child_cleanup_failed", "mount_branch", "branch mount failed and cleanup also failed", { causeCode: mounted.error.code, causeOperation: mounted.error.operation, cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  const published = owner.publish();
+  if (!published.ok) {
+    const cleaned = owner.dispose();
+    if (cleaned.ok) record.owner.releaseChild(owner);
+    return cleaned.ok ? published : failure(rendererError("child_cleanup_failed", "mount_branch", "branch publication failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  record.activeBranch = owner;
+  record.activeRoots = mounted.value;
+  record.activation += 1;
+  return success(undefined);
+}
+
+function mountConditional(
+  scope: RootMountScope,
+  runtime: ReactiveCore,
+  parentOwner: ComponentOwner,
+  condition: ConditionalRegionPlan,
+  parent: Node,
+  insertionAnchor: Node | null = null,
+): CoreResult<void> {
+  const ownerResult = parentOwner.createChild(`region:${condition.id}`);
+  if (!ownerResult.ok) return ownerResult;
+  const owner = ownerResult.value;
+  let start: Comment;
+  let end: Comment;
+  try {
+    start = scope.createAnchor();
+    end = scope.createAnchor();
+    scope.insertBefore(parent, start, insertionAnchor);
+    scope.insertBefore(parent, end, insertionAnchor);
+  } catch (error) {
+    const cleaned = owner.dispose();
+    return cleaned.ok ? failure(normalizeThrown(error, "invalid_anchor", "mount_conditional")) : failure(rendererError("child_cleanup_failed", "mount_conditional", "anchor creation failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  const record: ConditionalRegionRecord = {
+    id: condition.id,
+    owner,
+    parent,
+    start,
+    end,
+    plan: condition,
+    activeSelector: undefined,
+    activeBranch: undefined,
+    activeRoots: [],
+    activation: 0,
+    state: "initializing",
+  };
+  const startCleanup = owner.trackResource(() => removeOwnedNode(scope, parent, start));
+  if (!startCleanup.ok) {
+    owner.dispose();
+    return startCleanup;
+  }
+  const endCleanup = owner.trackResource(() => removeOwnedNode(scope, parent, end));
+  if (!endCleanup.ok) {
+    owner.dispose();
+    return endCleanup;
+  }
+
+  const update = (): CoreResult<unknown> => {
+    if (record.state === "disposing" || record.state === "disposed" || record.state === "cleanup_failed") {
+      return failure(rendererError("foreign_owner", "update_conditional", `conditional region ${record.id} is not active`));
+    }
+    let evaluated: RendererResult<boolean>;
+    try {
+      evaluated = condition.evaluate({ runtime });
+    } catch (error) {
+      return failure(normalizeThrown(error, "invalid_selector_result", "evaluate_conditional"));
+    }
+    if (!isCoreResult(evaluated)) return failure(rendererError("invalid_selector_result", "evaluate_conditional", `conditional region ${record.id} evaluator returned a malformed result`));
+    if (!evaluated.ok) return evaluated;
+    if (typeof evaluated.value !== "boolean") return failure(rendererError("invalid_selector_result", "evaluate_conditional", `conditional region ${record.id} selector must return a boolean`));
+    const selected = evaluated.value;
+    if (record.activeSelector !== undefined && record.activeSelector === selected) return success(undefined);
+    if (record.activeSelector !== undefined) {
+      const range = validateRegionRange(scope, record);
+      if (!range.ok) {
+        record.state = "cleanup_failed";
+        return range;
+      }
+      record.state = "updating";
+      const disposed = disposeBranch(record);
+      if (!disposed.ok) {
+        record.state = "cleanup_failed";
+        return disposed;
+      }
+    }
+    const mounted = mountBranch(scope, runtime, record, selected ? condition.whenTrue : condition.whenFalse, selected);
+    record.activeSelector = selected;
+    if (!mounted.ok) {
+      record.state = "empty";
+      return mounted;
+    }
+    record.state = "active";
+    return success(undefined);
+  };
+
+  const structural = scope.registerStructural({ dependencies: condition.dependencies, key: condition.id, update });
+  if (!structural.ok) {
+    const cleaned = owner.dispose();
+    return cleaned.ok ? structural : failure(rendererError("child_cleanup_failed", "mount_conditional", "structural registration failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  const structuralCleanup = owner.trackResource(() => scope.disposeStructural(structural.value));
+  if (!structuralCleanup.ok) {
+    const cleaned = owner.dispose();
+    return cleaned.ok ? structuralCleanup : failure(rendererError("child_cleanup_failed", "mount_conditional", "structural ownership failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  const published = owner.publish();
+  if (!published.ok) {
+    const cleaned = owner.dispose();
+    return cleaned.ok ? published : failure(rendererError("child_cleanup_failed", "mount_conditional", "conditional owner publication failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
+  }
+  return success(undefined);
 }
 
 function executeChildren(scope: RootMountScope, runtime: ReactiveCore, plan: PlanValidation, owner: ComponentOwner, parentId: string, parent: Node, nodes: ReadonlyMap<string, Node>): CoreResult<void> {
@@ -457,13 +780,24 @@ function executeChildren(scope: RootMountScope, runtime: ReactiveCore, plan: Pla
     } else if (item.component !== undefined) {
       const mounted = mountComponent(scope, runtime, owner, item.component, parent);
       if (!mounted.ok) return mounted;
+    } else if (item.condition !== undefined) {
+      const mounted = mountConditional(scope, runtime, owner, item.condition, parent);
+      if (!mounted.ok) return mounted;
     }
   }
   return success(undefined);
 }
 
-function executePlan(scope: RootMountScope, runtime: ReactiveCore, plan: PlanValidation, owner: ComponentOwner, parent: Node = scope.container): CoreResult<void> {
+function executePlan(
+  scope: RootMountScope,
+  runtime: ReactiveCore,
+  plan: PlanValidation,
+  owner: ComponentOwner,
+  parent: Node = scope.container,
+  insertionAnchor: Node | null = null,
+): CoreResult<readonly Node[]> {
   const nodes = new Map<string, Node>();
+  const roots: Node[] = [];
   try {
     for (const nodePlan of plan.plan.nodes) {
       nodes.set(nodePlan.id, nodePlan.kind === "text" ? scope.createTextNode(nodePlan.text) : scope.createElement(nodePlan.name, nodePlan.namespace));
@@ -475,7 +809,43 @@ function executePlan(scope: RootMountScope, runtime: ReactiveCore, plan: PlanVal
         for (const property of nodePlan.properties ?? []) scope.setProperty(node, property.property, property.value);
       }
     }
-    for (const listener of plan.plan.listeners) scope.addEventListener(nodes.get(listener.targetId)!, listener.type, listener.listener, listener.options);
+    for (const item of orderedItems(plan, undefined)) {
+      if (item.node !== undefined) {
+        scope.insertBefore(parent, nodes.get(item.node.id)!, insertionAnchor);
+        const rootNode = nodes.get(item.node.id)!;
+        const tracked = trackOwnedNode(scope, owner, parent, rootNode);
+        if (!tracked.ok) return tracked;
+        roots.push(rootNode);
+        if (item.node.kind === "element") {
+          const nested = executeChildren(scope, runtime, plan, owner, item.node.id, nodes.get(item.node.id)!, nodes);
+          if (!nested.ok) return nested;
+        }
+      } else if (item.component !== undefined) {
+        const mounted = mountComponent(scope, runtime, owner, item.component, parent, insertionAnchor);
+        if (!mounted.ok) return mounted;
+        roots.push(...mounted.value);
+      } else if (item.condition !== undefined) {
+        const mounted = mountConditional(scope, runtime, owner, item.condition, parent, insertionAnchor);
+        if (!mounted.ok) return mounted;
+      }
+    }
+    for (const listener of plan.plan.listeners) {
+      const added = scope.addEventListener(nodes.get(listener.targetId)!, listener.type, listener.listener, listener.options);
+      if (added) {
+        const tracked = owner.trackResource(() => {
+          try {
+            scope.removeEventListener(nodes.get(listener.targetId)!, listener.type, listener.listener, listener.options);
+            return success(undefined);
+          } catch (error) {
+            if (listener.options !== undefined && typeof listener.options === "object" && listener.options.once === true && normalizeThrown(error, "invalid_listener", "remove_event_listener").code === "invalid_listener") {
+              return success(undefined);
+            }
+            return failure(normalizeThrown(error, "invalid_listener", "remove_event_listener"));
+          }
+        });
+        if (!tracked.ok) return tracked;
+      }
+    }
     for (const binding of plan.plan.bindings) {
       const registered = scope.registerBinding({ target: nodes.get(binding.targetId)!, dependencies: binding.dependencies, key: binding.slot, update: () => updateBinding(scope, runtime, binding, nodes) });
       if (!registered.ok) return registered;
@@ -485,19 +855,7 @@ function executePlan(scope: RootMountScope, runtime: ReactiveCore, plan: PlanVal
         return owned;
       }
     }
-    for (const item of orderedItems(plan, undefined)) {
-      if (item.node !== undefined) {
-        scope.appendChild(parent, nodes.get(item.node.id)!);
-        if (item.node.kind === "element") {
-          const nested = executeChildren(scope, runtime, plan, owner, item.node.id, nodes.get(item.node.id)!, nodes);
-          if (!nested.ok) return nested;
-        }
-      } else if (item.component !== undefined) {
-        const mounted = mountComponent(scope, runtime, owner, item.component, parent);
-        if (!mounted.ok) return mounted;
-      }
-    }
-    return success(undefined);
+    return success(roots);
   } catch (error) {
     return failure(normalizeThrown(error, "host_mutation_failed", "mount_view"));
   }
@@ -510,7 +868,14 @@ function snapshotProps(value: ComponentProps | undefined): RendererResult<Compon
   return success(Object.freeze({ ...record }) as ComponentProps);
 }
 
-function mountComponent(scope: RootMountScope, runtime: ReactiveCore, parentOwner: ComponentOwner, placement: ComponentPlacementPlan, parent: Node): CoreResult<void> {
+function mountComponent(
+  scope: RootMountScope,
+  runtime: ReactiveCore,
+  parentOwner: ComponentOwner,
+  placement: ComponentPlacementPlan,
+  parent: Node,
+  insertionAnchor: Node | null = null,
+): CoreResult<readonly Node[]> {
   const definition = asRecord(placement.component);
   if (definition === undefined || !validIdentifier(definition.typeId) || typeof definition.setup !== "function") return failure(componentFailure("invalid_component_type", `component ${placement.id} has an invalid definition`));
   const props = snapshotProps(placement.props);
@@ -536,7 +901,7 @@ function mountComponent(scope: RootMountScope, runtime: ReactiveCore, parentOwne
     const cleaned = owner.dispose();
     return cleaned.ok ? failure(componentFailure("invalid_component_plan", `component ${placement.id} returned an invalid plan`, childPlan.error)) : failure(componentFailure("child_cleanup_failed", `component ${placement.id} plan validation failed and cleanup failed`, cleaned.error));
   }
-  const mounted = executePlan(scope, runtime, childPlan.value, owner, parent);
+  const mounted = executePlan(scope, runtime, childPlan.value, owner, parent, insertionAnchor);
   if (!mounted.ok) {
     const cleaned = owner.dispose();
     return cleaned.ok ? failure(componentFailure("child_mount_failed", `component ${placement.id} mount failed`, mounted.error)) : failure(componentFailure("child_cleanup_failed", `component ${placement.id} mount failed and cleanup failed`, cleaned.error));
@@ -546,7 +911,7 @@ function mountComponent(scope: RootMountScope, runtime: ReactiveCore, parentOwne
     const cleaned = owner.dispose();
     return cleaned.ok ? published : failure(componentFailure("child_cleanup_failed", `component ${placement.id} publication failed and cleanup failed`, cleaned.error));
   }
-  return success(undefined);
+  return success(mounted.value);
 }
 
 function instantiateAndValidate(view: ViewDescription, runtime: ReactiveCore): RendererResult<PlanValidation> {

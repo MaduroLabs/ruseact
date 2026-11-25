@@ -25,9 +25,9 @@ Ruseact explores a different separation of responsibilities:
 - **TypeScript/JavaScript:** Component execution and browser-facing integration.
 - **DOM adapter:** Native M3.2 host operations, M3.3 explicit bindings, the
   M3.4 root lifecycle, the approved M4.2 public renderer MVP, the narrow M4.3
-  JSX/TSX compiler MVP, the approved M4.4.2 one-shot component subset, and the
-  approved M4.4.3 conditional-region subset are implemented; keyed structural
-  rendering remains deferred.
+  JSX/TSX compiler MVP, the approved M4.4.2 one-shot component subset, the
+  approved M4.4.3 conditional-region subset, and the M4.4.4 keyed-list
+  implementation are present; keyed-list promotion remains subject to review.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -58,11 +58,12 @@ API compatibility is claimed.
 | M4.3 — JSX/TSX compiler MVP | Complete; hosted Chromium verification passed |
 | M4.4.1 — Component and structural rendering contract | Complete; conditional and keyed contracts remain deferred |
 | M4.4.2 — Function components and nested ownership | Complete; hosted Chromium verification passed |
-| M4.4.3 — Conditional structural regions | Implemented on the reviewed feature branch; hosted Chromium verification required |
+| M4.4.3 — Conditional structural regions | Complete; hosted Chromium verification passed |
+| M4.4.4 — Keyed lists and stable DOM identity | Implemented on the reviewed feature branch; hosted Chromium and benchmark verification required |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
-| Compiler integration       | M4.3 intrinsic TSX, M4.4.2 component placement, and M4.4.3 conditional transforms implemented; keyed syntax deferred |
+| Compiler integration       | M4.3 intrinsic TSX, M4.4.2 component placement, M4.4.3 conditional transforms, and provisional M4.4.4 keyed syntax implemented |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
 ### Currently implemented
@@ -132,11 +133,12 @@ The Rust reactive core supports:
   one-shot mount semantics; and delegation to the existing M3.2–M3.4
   ownership, binding, and cleanup pipeline.
 
-- An internal M4.3/M4.4.2/M4.4.3 compiler module in
+- An internal M4.3/M4.4.2/M4.4.3/M4.4.4 compiler module in
   `packages/ruseact-compiler` that parses a deliberately limited TSX subset
   with the TypeScript Compiler API and emits executable ESM compatible with
-  `ViewDescription` versions 1, 2, and the approved conditional subset of 3. It
-  generates deterministic static node, component, and slot IDs, preserves
+  `ViewDescription` versions 1, 2, 3, and the provisional version-4 keyed-list
+  subset. It generates deterministic static node, component, structural, and
+  slot IDs, preserves
   JavaScript closures and event handlers, requires explicit compiler-only
   dependency markers, and reports source-located diagnostics for unsupported
   syntax. Component setup is supplied separately through `defineComponent`;
@@ -146,8 +148,9 @@ The Rust reactive core supports:
 - An M4.4.1 design for component identity, hierarchical resource ownership,
   anchored conditional regions, keyed-only list identity, and their compiler
   and flush boundaries. M4.4.2 implements the approved one-shot component and
-  nested-owner subset. M4.4.3 implements only the approved conditional-region
-  subset; keyed lists and component rerendering remain deferred.
+  nested-owner subset. M4.4.3 implements the approved conditional-region
+  subset. M4.4.4 adds only the approved keyed-list subset; component
+  rerendering, unkeyed lists, and scheduling remain deferred.
 
 M4.1 defined the renderer/compiler contract and the project owner approved the
 narrow M4.2 subset. M4.2 implements the public root façade over the internal
@@ -157,8 +160,12 @@ manual flush. M4.3 emits the intrinsic version-1 plan with provisional
 public runtime APIs. M4.4.2 adds only the approved static version-2 component
 placements and hierarchical ownership. M4.4.3 adds version-3 private comment
 anchors, explicit boolean selector regions, branch-local ownership, and shared
-scalar/structural one-pass dispatch. Keyed lists, automatic dependency
-tracking, and scheduling remain deferred.
+scalar/structural one-pass dispatch. M4.4.4 adds version-4 keyed-only list
+regions with SameValueZero keys, pre-mutation validation, JavaScript
+collection publication through an explicit revision signal, stable item-owned
+scalar signals, and deterministic native range movement. Keyed lists do not
+add automatic dependency tracking, scheduling, unkeyed behavior, or component
+rerendering.
 
 The M4.4.1 proposal in
 [docs/m4.4-component-structural-design.md](docs/m4.4-component-structural-design.md)
@@ -169,9 +176,10 @@ that proposal changes the implemented M4.2/M4.3 protocol.
 
 Rust computation execution, automatic dependency tracking, and scheduling are
 not implemented. M3.3 and M3.4 execute explicitly registered JavaScript
-updates only. The public DOM renderer and private compiler are implemented only
-at the narrow M4.2/M4.3 scope described above; a browser bundler matrix,
-worker handle transfer, components, and structural rendering remain deferred.
+updates only. The private compiler remains a narrow M4.3–M4.4.4 transform,
+not a general JSX compatibility layer; browser bundler integration, worker
+handle transfer, unkeyed lists, hooks, and component rerendering remain
+deferred.
 
 M3.1 documents a proposed DOM renderer architecture in
 [docs/dom-renderer-design.md](docs/dom-renderer-design.md). The proposal
@@ -188,9 +196,10 @@ execution, automatic dependency tracking, scheduling, or a public DOM API.
 - `packages/ruseact` — TypeScript runtime bridge and shared scalar/handle
   types.
 - `packages/ruseact-compiler` — private TypeScript Compiler API transform for
-  the supported M4.3 TSX subset; it is not a published package.
+  the supported M4.3–M4.4.4 TSX subset; it is not a published package.
 - `packages/ruseact-dom` — Browser host adapter, explicit bindings, internal
-  root lifecycle, and the M4.2 public renderer façade.
+  root lifecycle, the M4.2 public renderer façade, and the M4.4.4 keyed-list
+  structural path.
 - `docs` — Architecture decisions and technical documentation.
 
 The [M2.1 WASM ABI design](docs/wasm-abi-design.md) records the reviewed

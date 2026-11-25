@@ -43,6 +43,7 @@ export interface RootMountScope {
   readonly insertBefore: HostContext["insertBefore"];
   readonly appendChild: HostContext["appendChild"];
   readonly removeChild: HostContext["removeChild"];
+  readonly retireNode: HostContext["retireNode"];
   readonly setText: HostContext["setText"];
   readonly setAttribute: HostContext["setAttribute"];
   readonly removeAttribute: HostContext["removeAttribute"];
@@ -341,6 +342,7 @@ export function createRootContext(
       insertBefore: (parent, child, anchor) => rootHost.insertBefore(parent, child, anchor),
       appendChild: (parent, child) => rootHost.appendChild(parent, child),
       removeChild: (parent, child) => rootHost.removeChild(parent, child),
+      retireNode: (node) => rootHost.retireNode(node),
       setText: (textNode, value) => rootHost.setText(textNode, value),
       setAttribute: (element, name, value, namespace) =>
         rootHost.setAttribute(element, name, value, namespace),

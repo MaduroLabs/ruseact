@@ -14,6 +14,8 @@ export interface ComponentOwner {
   readonly state: OwnerLifecycleState;
   createChild(localIdentity: string): CoreResult<ComponentOwner>;
   releaseChild(child: ComponentOwner): CoreResult<void>;
+  trackNode(node: Node): CoreResult<void>;
+  containsNode(node: Node): boolean;
   trackBinding(binding: BindingHandle, dispose: () => CoreResult<void>): CoreResult<void>;
   trackResource(cleanup: () => CoreResult<unknown> | void): CoreResult<void>;
   publish(): CoreResult<void>;
@@ -82,6 +84,7 @@ function createOwner(
   let state: OwnerLifecycleState = "initializing";
   const children: ComponentOwner[] = [];
   const childIdentities = new Set<string>();
+  const nodes = new Set<Node>();
   const resources: ResourceRecord[] = [];
 
   function activeForRegistration(operation: string): CoreResult<void> | undefined {
@@ -124,6 +127,24 @@ function createOwner(
     return success(undefined);
   }
 
+  function trackNode(node: Node): CoreResult<void> {
+    const unavailable = activeForRegistration("track_component_node");
+    if (unavailable !== undefined) return unavailable;
+    if (!isObject(node) || typeof (node as Node).nodeType !== "number") {
+      return failure(ownerError("invalid_component_instance", "track_component_node", "a DOM node is required"));
+    }
+    if (nodes.has(node)) {
+      return failure(ownerError("invalid_component_instance", "track_component_node", `node is already owned by ${id}`));
+    }
+    nodes.add(node);
+    return success(undefined);
+  }
+
+  function containsNode(node: Node): boolean {
+    if (nodes.has(node)) return true;
+    return children.some((child) => child.containsNode(node));
+  }
+
   function releaseChild(child: ComponentOwner): CoreResult<void> {
     const unavailable = activeForRegistration("release_component_owner");
     if (unavailable !== undefined) {
@@ -134,6 +155,10 @@ function createOwner(
       return failure(ownerError("foreign_owner", "release_component_owner", `owner ${id} cannot release the supplied child`));
     }
     children.splice(index, 1);
+    const prefix = `${id}/`;
+    if (child.id.startsWith(prefix)) {
+      childIdentities.delete(child.id.slice(prefix.length));
+    }
     return success(undefined);
   }
 
@@ -204,6 +229,7 @@ function createOwner(
       state = "cleanup_failed";
       return failure(firstError);
     }
+    nodes.clear();
     state = "disposed";
     return success(undefined);
   }
@@ -216,6 +242,8 @@ function createOwner(
     },
     createChild,
     releaseChild,
+    trackNode,
+    containsNode,
     trackBinding,
     trackResource,
     publish,

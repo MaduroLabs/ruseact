@@ -3,7 +3,7 @@ import type {
   CoreResult,
   ReactiveCore,
   SupportedScalar,
-} from "../../ruseact/src/types.js";
+} from "ruseact";
 import {
   BindingHandle,
   createBindingContext,

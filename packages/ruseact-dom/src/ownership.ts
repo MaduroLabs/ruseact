@@ -1,4 +1,4 @@
-import type { CoreError, CoreResult } from "../../ruseact/src/types.js";
+import type { CoreError, CoreResult } from "ruseact";
 import type { BindingHandle } from "./bindings.js";
 
 export type OwnerLifecycleState =

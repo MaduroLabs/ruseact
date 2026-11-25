@@ -9,6 +9,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
+    "build": "node scripts/build_distribution.mjs",
+    "build:distribution": "node scripts/build_distribution.mjs",
+    "pack:packages": "node scripts/pack_distribution.mjs",
+    "validate:distribution": "node scripts/validate_distribution.mjs",
+    "test:packages": "node scripts/test_packages.mjs",
     "test:runtime": "node scripts/test_typescript_runtime.mjs",
     "test:browser": "node scripts/test_browser_runtime.mjs",
     "test:browser:dom": "node scripts/test_browser_dom.mjs",

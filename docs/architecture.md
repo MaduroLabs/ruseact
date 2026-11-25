@@ -942,3 +942,48 @@ preserves lexical closures and lazy factory execution. See
 [docs/m4.4.4-keyed-lists.md](m4.4.4-keyed-lists.md). M4.5 consumer integration,
 unkeyed behavior, hooks, scheduling, VDOM, and new Rust/WASM ABI remain
 deferred.
+
+## Decision 32: M4.5.1 distributes the existing three packages as private tarballs
+
+M4.5.1 adds package production and isolated-consumer verification without
+changing renderer semantics. The existing boundaries remain `ruseact` for the
+TypeScript runtime and packaged WASM, `ruseact-dom` for the public renderer,
+components, and structural plans, and `ruseact-compiler` for build-time TSX
+compilation. The dependency graph is `ruseact-dom -> ruseact` and
+`ruseact-compiler -> typescript`; runtime packages do not depend on the
+compiler.
+
+All three staged packages use private synchronized version `0.1.0-alpha.0`.
+The source workspace keeps the DOM package's `workspace:0.1.0-alpha.0`
+relationship, while the packed manifest contains the exact runtime package
+version and no workspace protocol. Tarballs expose only explicit ESM package
+roots and the documented `ruseact/wasm/node` and `ruseact/wasm/web` loader
+subpaths. TypeScript emits executable ESM, declarations, and source maps;
+runtime packages do not include TypeScript compiler code.
+
+The release `wasm32-unknown-unknown` binary and matching `wasm-bindgen 0.2.130`
+Node/web glue are packaged with `ruseact`. Runtime initialization remains
+explicit through `createReactiveCore(loadWasm)`, with no import-time singleton
+or scheduler. The Node generated glue is isolated under a private nested
+CommonJS package boundary; the browser generated glue remains an explicit web
+ESM loader. Consumers do not build Rust after installation.
+
+The DOM source imports runtime values and types through the canonical `ruseact`
+package identity rather than workspace-relative runtime modules. This keeps
+opaque handle definitions and runtime registries canonical when an installed
+consumer imports `ruseact` and `ruseact-dom` together. The package pipeline
+does not weaken handle validation or embed a duplicate runtime.
+
+`target/distribution/distribution-manifest.json` records the source revision,
+dirty-tree status, artifact paths, sizes, SHA-256 checksums, toolchains, WASM
+targets, and supported template protocols 1–4. It is provenance metadata, not
+a signing or attestation system, and the build does not claim byte-for-byte
+reproducibility without an independent clean-build comparison.
+
+The isolated consumer installs copied tarballs outside the workspace, validates
+installed declarations, initializes real WASM, compiles supported TSX, and
+runs version-1 static, version-2 component, version-3 conditional, and
+version-4 keyed fixtures in Chromium. Local artifact production is verified by
+the package scripts and CI distribution job; npm publication, tags, releases,
+automatic publishing, and the separate examples repository remain out of
+scope. See [the M4.5.1 distribution design](m4.5-package-distribution.md).

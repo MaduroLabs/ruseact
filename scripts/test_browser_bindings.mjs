@@ -83,7 +83,7 @@ function runBrowser(command, args) {
 function browserPage() {
   return String.raw`<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Ruseact M3.3 reactive DOM bindings</title></head>
+  <head><meta charset="utf-8"><title>Ruseact M3.3 reactive DOM bindings</title><script type="importmap">{"imports":{"ruseact":"./ruseact/src/index.js"}}</script></head>
   <body data-status="pending">
     <p>Running Ruseact reactive DOM binding checks…</p>
     <script>
@@ -512,31 +512,8 @@ const requests = [];
 
 try {
   execFileSync(
-    "corepack",
-    [
-      "pnpm",
-      "exec",
-      "tsc",
-      "--target",
-      "ES2022",
-      "--module",
-      "ESNext",
-      "--moduleResolution",
-      "Bundler",
-      "--strict",
-      "--skipLibCheck",
-      "--declaration",
-      "false",
-      "--noEmit",
-      "false",
-      "--rootDir",
-      "packages",
-      "--outDir",
-      temporaryRoot,
-      "packages/ruseact/src/index.ts",
-      "packages/ruseact-dom/src/host.ts",
-      "packages/ruseact-dom/src/bindings.ts",
-    ],
+    process.execPath,
+    [path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), temporaryRoot],
     { cwd: repositoryRoot, stdio: "inherit" },
   );
 

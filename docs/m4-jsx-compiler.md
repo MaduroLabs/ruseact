@@ -1,14 +1,16 @@
 # M4.3 JSX/TSX compiler MVP
 
-Status: implementation in progress on `feature/m4.3-jsx-compiler`. This
-document describes the implemented MVP boundary; it does not add a public
-compiler package or promise React JSX compatibility.
+Status: M4.3 is complete and M4.4.2 extends this private compiler with the
+approved static component-placement subset. This document describes the
+implemented boundary; it does not add a public compiler package or promise
+React JSX compatibility.
 
 ## Purpose and boundary
 
 The compiler is an internal TypeScript Compiler API transform from a narrow
 TSX subset to executable JavaScript modules that produce the implemented M4.2
-`ViewDescription` version 1 contract. It reuses `ruseact-dom`'s public
+`ViewDescription` version 1 and approved version 2 component-placement
+contracts. It reuses `ruseact-dom`'s public
 renderer and does not add a second renderer, a virtual DOM, a scheduler, a
 component runtime, or a new Rust/WASM interface.
 
@@ -68,11 +70,18 @@ scalar results to strings; property slots preserve the existing boolean/string
 contract. The compiler never constructs or serializes a signal or computation
 handle.
 
+M4.4.2 also accepts statically named uppercase component references such as
+`<Heading label="Title" />` and emits version-2 placement metadata. The
+component reference remains a lexical JavaScript value supplied by the caller;
+the compiler does not invoke or serialize it. The caller supplies a validated
+`defineComponent` definition. Component props are scalar expressions or
+explicit signal-handle references, and component children are not supported.
+
 ## Unsupported syntax
 
 The compiler rejects, with source-located diagnostics:
 
-- Function components, dynamic component tags, and uppercase intrinsic names.
+- Dynamic component tags, component children, and unsupported uppercase forms.
 - JSX fragments and structural conditional expressions.
 - Dynamic JSX arrays, keyed lists, and children that produce multiple runtime
   nodes.
@@ -84,11 +93,13 @@ The compiler rejects, with source-located diagnostics:
 
 Rejecting these forms is intentional. A stale or structurally incorrect plan
 is worse than a compile-time diagnostic. Conditional regions, keyed identity,
-components, and dynamic tracking require separately approved contracts.
+and dynamic tracking require separately approved contracts. Component setup and
+nested ownership are implemented only at the M4.4.2 one-shot static-placement
+scope.
 
 ## Generated module contract
 
-Generated code contains ordinary JavaScript closures and objects matching:
+Intrinsic-only generated code contains ordinary JavaScript closures and objects matching:
 
 ```ts
 {
@@ -102,6 +113,11 @@ Generated code contains ordinary JavaScript closures and objects matching:
   }),
 }
 ```
+
+When the plan contains statically named component references, the same
+`ruseact.template` protocol uses version 2 and adds a `components` array of
+`{ kind: "component", id, parentId, order, component, props }` placements.
+Version 1 output remains unchanged for intrinsic-only modules.
 
 Node IDs (`n0`, `n1`, ...), binding IDs (`b0`, `b1`, ...), listener IDs
 (`l0`, `l1`, ...), and the template hash are deterministic for the source

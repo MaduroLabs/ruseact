@@ -103,7 +103,28 @@ try {
   assert.equal(repeat.code, staticResult.code, "same source must emit stable code");
   assert.equal(repeat.metadata.templateId, staticResult.metadata.templateId);
 
-  assertFailure(compiler.compileTsxModule("const view = <Counter />;", { fileName: "component.tsx" }), "unsupported_component_tag");
+  const componentSource = `export function createView({ Heading }) {
+  return <div><Heading /><Heading label={"second"} /></div>;
+}`;
+  const componentResult = compiler.compileTsxModule(componentSource, { fileName: "component.tsx" });
+  assert.equal(componentResult.ok, true, JSON.stringify(componentResult));
+  const componentModulePath = path.join(temporaryRoot, "component-view.mjs");
+  writeFileSync(componentModulePath, componentResult.code);
+  const componentModule = await import(pathToFileURL(componentModulePath));
+  const heading = { typeId: "Heading", setup() { return { ok: true, value: {} }; } };
+  const componentView = componentModule.createView({ Heading: heading });
+  const componentPlan = componentView.instantiate({ runtime: {} });
+  assert.equal(componentView.version, 2);
+  assert.deepEqual(componentPlan.components.map((component) => component.id), ["c0", "c1"]);
+  assert.deepEqual(componentPlan.components.map((component) => component.props), [{}, { label: "second" }]);
+  assert.equal(componentResult.metadata.slots.filter((slot) => slot.kind === "component").length, 2);
+  const repeatedComponents = compiler.compileTsxModule(componentSource, { fileName: "component.tsx" });
+  assert.equal(repeatedComponents.ok, true);
+  assert.equal(repeatedComponents.code, componentResult.code, "component output must be deterministic");
+
+  assertFailure(compiler.compileTsxModule("const view = <components.name />;", { fileName: "dynamic-component.tsx" }), "unsupported_dynamic_component");
+  assertFailure(compiler.compileTsxModule("const view = <Counter><span /></Counter>;", { fileName: "component-children.tsx" }), "unsupported_component_children");
+  assertFailure(compiler.compileTsxModule("const view = <Counter {...props} />;", { fileName: "component-spread.tsx" }), "unsupported_spread_attribute");
   assertFailure(compiler.compileTsxModule("const view = <div {...props} />;", { fileName: "spread.tsx" }), "unsupported_spread_attribute");
   assertFailure(compiler.compileTsxModule("const view = <svg><path /></svg>;", { fileName: "svg.tsx" }), "unsupported_component_tag");
   assertFailure(compiler.compileTsxModule("const view = <div title={value} />;", { fileName: "implicit.tsx" }), "implicit_dynamic_binding");
@@ -115,7 +136,7 @@ try {
   assert.equal(located.ok ? undefined : located.diagnostics[0].location.fileName, "located.tsx");
   assert.equal(located.ok ? undefined : located.diagnostics[0].location.line, 1);
 
-  console.log("M4.3 compiler tests passed: static plans, bindings, closures, diagnostics, and deterministic output");
+  console.log("M4.3/M4.4.2 compiler tests passed: static plans, bindings, component placements, diagnostics, and deterministic output");
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

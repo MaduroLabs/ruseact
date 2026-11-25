@@ -820,3 +820,37 @@ approved public API. The anchor node kind, component identity, props update
 semantics, structural protocol version, key policy, and recovery behavior
 require human approval before M4.4.2–M4.4.4 implementation. See
 [docs/m4.4-component-structural-design.md](m4.4-component-structural-design.md).
+
+## Decision 29: M4.4.2 implements one-shot function components and nested ownership
+
+M4.4.2 implements the approved component subset in
+`packages/ruseact-dom/src/renderer.ts` and `ownership.ts`. The public
+`defineComponent(typeId, setup)` helper creates a validated component
+definition. Setup receives an immutable shallow scalar/signal-handle props
+snapshot and a narrow environment, executes once per instance, and returns a
+structured version-1 or version-2 child view. Signal changes update only the
+explicit binding computations; they never rerun component setup.
+
+The existing `ruseact.template` version 1 contract remains unchanged. Version
+2 adds only stable static component placements, component definitions, initial
+props, and sibling order metadata. Both versions use the same host, binding,
+and root lifecycle implementation. Component references and callbacks remain
+ordinary JavaScript closures; no handles are serialized or manufactured by the
+compiler.
+
+Component identity is a parent-owner path plus local static placement slot and
+component type. A component is not a DOM position or a Rust computation. Each
+component gets a provisional owner before setup. Owners track renderer-owned
+binding computations and child owners; the root host remains the single
+authoritative registry for listeners and DOM nodes. Cleanup is child-first and
+reverse-registration ordered before root binding/host cleanup. Failures retain
+structured cause and cleanup diagnostics and do not dispose borrowed runtimes
+or application signals.
+
+M4.4.2 extends the private M4.3 compiler to accept statically named uppercase
+component references and emit version-2 placement metadata. It rejects
+dynamic component expressions, component children, conditional regions, lists,
+spreads, hooks, and implicit dependencies. Conditional regions, anchors,
+structural computations, keyed lists, rerendering, and scheduling remain
+deferred to separately approved milestones. See
+[docs/m4.4.2-function-components.md](m4.4.2-function-components.md).

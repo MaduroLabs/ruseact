@@ -263,6 +263,9 @@
 - `corepack pnpm test:packages` — PASS with approved execution; installed
   package declarations typechecked, installed Node/WASM/compiler smoke passed,
   38 isolated Chromium checks passed, and the runtime-only consumer passed.
+- `corepack pnpm benchmark:browser:dom` followed by
+  `corepack pnpm benchmark:dom:validate` — PASS; 56 valid rows and 0
+  unresolved rows after the canonical package-import compiler fix.
 - Local host limitation: Node is `22.23.3`; the repository-pinned CI runtime is
   Node `24.22.3` from `.nvmrc`. No pinned toolchain was changed.
 

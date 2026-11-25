@@ -48,6 +48,9 @@ export interface RootMountScope {
   readonly registerBinding: (
     registration: BindingRegistration,
   ) => CoreResult<BindingHandle>;
+  readonly disposeBinding: (binding: BindingHandle) => CoreResult<void>;
+  /** Internal renderer cleanup registration; not exported from ruseact-dom. */
+  readonly registerCleanup: (cleanup: () => CoreResult<unknown> | void) => void;
 }
 
 export type RootMountSetup =
@@ -228,6 +231,10 @@ export function createRootContext(
   let lifecycle: RootLifecycleState = "created";
   let bindingContext: BindingContext | undefined;
   let hostDisposed = false;
+  const cleanupCallbacks: Array<{
+    readonly cleanup: () => CoreResult<unknown> | void;
+    completed: boolean;
+  }> = [];
 
   function releaseContainer(): void {
     if (ROOT_OWNERS.get(container) === root) {
@@ -237,6 +244,37 @@ export function createRootContext(
 
   function cleanup(operation: string): CoreResult<void> {
     let firstError: CoreError | undefined;
+
+    for (let index = cleanupCallbacks.length - 1; index >= 0; index -= 1) {
+      const registration = cleanupCallbacks[index];
+      if (registration.completed) {
+        continue;
+      }
+      try {
+        const result = registration.cleanup();
+        if (result !== undefined && !isCoreResult(result)) {
+          if (firstError === undefined) {
+            firstError = rootError(
+              "root_cleanup_failed",
+              operation,
+              "registered root cleanup returned a malformed result",
+            );
+          }
+          continue;
+        }
+        if (result !== undefined && !result.ok) {
+          if (firstError === undefined) {
+            firstError = result.error;
+          }
+          continue;
+        }
+        registration.completed = true;
+      } catch (error) {
+        if (firstError === undefined) {
+          firstError = errorFromThrown(error, operation);
+        }
+      }
+    }
 
     if (bindingContext !== undefined) {
       const bindingsContext = bindingContext;
@@ -304,6 +342,13 @@ export function createRootContext(
       removeEventListener: (element, type, listener, options) =>
         rootHost.removeEventListener(element, type, listener, options),
       registerBinding: (registration) => bindings.registerBinding(registration),
+      disposeBinding: (binding) => bindings.disposeBinding(binding),
+      registerCleanup: (cleanupRegistration) => {
+        if (typeof cleanupRegistration !== "function") {
+          throw rootError("invalid_mount", "register_cleanup", "cleanup must be a function");
+        }
+        cleanupCallbacks.push({ cleanup: cleanupRegistration, completed: false });
+      },
     };
   }
 

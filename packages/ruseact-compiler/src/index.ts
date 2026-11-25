@@ -24,7 +24,7 @@ export interface CompilerNodeMetadata {
 
 export interface CompilerSlotMetadata {
   readonly id: string;
-  readonly kind: "text" | "attribute" | "property" | "listener";
+  readonly kind: "text" | "attribute" | "property" | "listener" | "component";
   readonly location: CompilerSourceLocation;
 }
 
@@ -58,6 +58,7 @@ interface NodePlan {
   readonly id: string;
   readonly kind: "element" | "text";
   readonly parentId?: string;
+  readonly order: number;
   readonly sourceNode: ts.Node;
   readonly name?: string;
   readonly text?: string;
@@ -67,6 +68,15 @@ interface NodePlan {
     readonly value: string | boolean;
     readonly sourceNode: ts.Node;
   }>;
+}
+
+interface ComponentPlan {
+  readonly id: string;
+  readonly parentId?: string;
+  readonly order: number;
+  readonly sourceNode: ts.Node;
+  readonly component: ts.Expression;
+  readonly props: readonly { readonly name: string; readonly value: ts.Expression }[];
 }
 
 interface BindingPlan {
@@ -101,11 +111,14 @@ interface PlanBuilderContext {
   readonly nodes: NodePlan[];
   readonly bindings: BindingPlan[];
   readonly listeners: ListenerPlan[];
+  readonly components: ComponentPlan[];
   readonly nodeMetadata: CompilerNodeMetadata[];
   readonly slotMetadata: CompilerSlotMetadata[];
   nextNode: number;
   nextBinding: number;
   nextListener: number;
+  nextComponent: number;
+  readonly nextOrderByParent: Map<string, number>;
 }
 
 const factory = ts.factory;
@@ -269,6 +282,13 @@ function addSlotMetadata(context: PlanBuilderContext, id: string, kind: Compiler
   context.slotMetadata.push({ id, kind, location: locationOf(context.sourceFile, node) });
 }
 
+function nextOrder(context: PlanBuilderContext, parentId: string | undefined): number {
+  const key = parentId ?? "<root>";
+  const order = context.nextOrderByParent.get(key) ?? 0;
+  context.nextOrderByParent.set(key, order + 1);
+  return order;
+}
+
 function addTextNode(context: PlanBuilderContext, parentId: string | undefined, text: string, sourceNode: ts.Node): string {
   const id = `n${context.nextNode}`;
   context.nextNode += 1;
@@ -276,6 +296,7 @@ function addTextNode(context: PlanBuilderContext, parentId: string | undefined, 
     id,
     kind: "text",
     ...(parentId === undefined ? {} : { parentId }),
+    order: nextOrder(context, parentId),
     sourceNode,
     text,
     attributes: [],
@@ -448,7 +469,7 @@ function parseChild(context: PlanBuilderContext, child: ts.JsxChild, parentId: s
     return;
   }
   if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)) {
-    parseElement(context, child, parentId);
+    parseJsxNode(context, child, parentId);
     return;
   }
   if (ts.isJsxExpression(child)) {
@@ -489,7 +510,7 @@ function parseElement(
   const openingElement = ts.isJsxElement(element) ? element.openingElement : element;
   const tag = jsxTagName(openingElement.tagName);
   if (tag === undefined || !isSupportedIntrinsicName(tag)) {
-    report(context, openingElement.tagName, "unsupported_component_tag", "only lowercase HTML intrinsic elements are supported");
+    report(context, openingElement.tagName, "unsupported_component_tag", "only lowercase HTML intrinsic elements or statically named components are supported");
     return;
   }
   const id = `n${context.nextNode}`;
@@ -498,6 +519,7 @@ function parseElement(
     id,
     kind: "element",
     ...(parentId === undefined ? {} : { parentId }),
+    order: nextOrder(context, parentId),
     sourceNode: element,
     name: tag,
     attributes: [],
@@ -513,6 +535,76 @@ function parseElement(
   }
 }
 
+function parseComponent(
+  context: PlanBuilderContext,
+  element: ts.JsxElement | ts.JsxSelfClosingElement,
+  parentId: string | undefined,
+): void {
+  const openingElement = ts.isJsxElement(element) ? element.openingElement : element;
+  if (!ts.isIdentifier(openingElement.tagName)) {
+    report(context, openingElement.tagName, "unsupported_dynamic_component", "component tags must be statically named identifiers");
+    return;
+  }
+  if (ts.isJsxElement(element) && element.children.length > 0) {
+    report(context, element, "unsupported_component_children", "component children are not supported in M4.4.2");
+    return;
+  }
+  const props: Array<{ readonly name: string; readonly value: ts.Expression }> = [];
+  for (const attribute of openingElement.attributes.properties) {
+    if (ts.isJsxSpreadAttribute(attribute)) {
+      report(context, attribute, "unsupported_spread_attribute", "component spread props are not supported in M4.4.2");
+      continue;
+    }
+    const name = jsxAttributeName(attribute.name);
+    if (name === undefined) {
+      report(context, attribute.name, "unsupported_attribute_name", "namespaced component props are not supported");
+      continue;
+    }
+    let value: ts.Expression;
+    if (attribute.initializer === undefined) {
+      value = factory.createTrue();
+    } else if (ts.isStringLiteral(attribute.initializer)) {
+      value = factory.createStringLiteral(attribute.initializer.text);
+    } else if (ts.isJsxExpression(attribute.initializer) && attribute.initializer.expression !== undefined) {
+      value = attribute.initializer.expression;
+    } else {
+      report(context, attribute.initializer, "unsupported_component_prop", `${name} must be a scalar expression or signal handle`);
+      continue;
+    }
+    props.push({ name, value });
+  }
+  const id = `c${context.nextComponent}`;
+  context.nextComponent += 1;
+  const component: ComponentPlan = {
+    id,
+    ...(parentId === undefined ? {} : { parentId }),
+    order: nextOrder(context, parentId),
+    sourceNode: element,
+    component: openingElement.tagName,
+    props,
+  };
+  context.components.push(component);
+  addSlotMetadata(context, id, "component", element);
+}
+
+function parseJsxNode(
+  context: PlanBuilderContext,
+  element: ts.JsxElement | ts.JsxSelfClosingElement,
+  parentId: string | undefined,
+): void {
+  const openingElement = ts.isJsxElement(element) ? element.openingElement : element;
+  const tag = jsxTagName(openingElement.tagName);
+  if (tag !== undefined && isSupportedIntrinsicName(tag)) {
+    parseElement(context, element, parentId);
+    return;
+  }
+  if (tag !== undefined && !/^[A-Z]/.test(tag)) {
+    report(context, openingElement.tagName, "unsupported_component_tag", "only supported lowercase HTML intrinsic elements and uppercase component references are allowed");
+    return;
+  }
+  parseComponent(context, element, parentId);
+}
+
 function objectProperty(name: string, initializer: ts.Expression): ts.PropertyAssignment {
   return factory.createPropertyAssignment(factory.createIdentifier(name), initializer);
 }
@@ -525,13 +617,16 @@ function stringExpression(value: string): ts.StringLiteral {
   return factory.createStringLiteral(value);
 }
 
-function makeStaticNodeExpression(node: NodePlan): ts.ObjectLiteralExpression {
+function makeStaticNodeExpression(node: NodePlan, includeOrder: boolean): ts.ObjectLiteralExpression {
   const properties: ts.ObjectLiteralElementLike[] = [
     objectProperty("id", stringExpression(node.id)),
     objectProperty("kind", stringExpression(node.kind)),
   ];
   if (node.parentId !== undefined) {
     properties.push(objectProperty("parentId", stringExpression(node.parentId)));
+  }
+  if (includeOrder) {
+    properties.push(objectProperty("order", factory.createNumericLiteral(node.order)));
   }
   if (node.kind === "text") {
     properties.push(objectProperty("text", stringExpression(node.text ?? "")));
@@ -549,6 +644,22 @@ function makeStaticNodeExpression(node: NodePlan): ts.ObjectLiteralExpression {
         objectProperty("value", typeof property.value === "boolean" ? (property.value ? factory.createTrue() : factory.createFalse()) : stringExpression(property.value)),
       ], false)), false)));
     }
+  }
+  return factory.createObjectLiteralExpression(properties, true);
+}
+
+function makeComponentExpression(component: ComponentPlan): ts.ObjectLiteralExpression {
+  const properties: ts.ObjectLiteralElementLike[] = [
+    objectProperty("kind", stringExpression("component")),
+    objectProperty("id", stringExpression(component.id)),
+    objectProperty("order", factory.createNumericLiteral(component.order)),
+    objectProperty("component", component.component),
+    objectProperty("props", factory.createObjectLiteralExpression(component.props.map((prop) =>
+      objectProperty(prop.name, prop.value),
+    ), true)),
+  ];
+  if (component.parentId !== undefined) {
+    properties.splice(2, 0, objectProperty("parentId", stringExpression(component.parentId)));
   }
   return factory.createObjectLiteralExpression(properties, true);
 }
@@ -636,10 +747,12 @@ function makeViewExpression(
   context: PlanBuilderContext,
   templateId: string,
 ): ts.ObjectLiteralExpression {
+  const hasComponents = context.components.length > 0;
   const plan = factory.createObjectLiteralExpression([
-    objectProperty("nodes", factory.createArrayLiteralExpression(context.nodes.map(makeStaticNodeExpression), true)),
+    objectProperty("nodes", factory.createArrayLiteralExpression(context.nodes.map((node) => makeStaticNodeExpression(node, hasComponents)), true)),
     objectProperty("bindings", factory.createArrayLiteralExpression(context.bindings.map(makeBindingExpression), true)),
     objectProperty("listeners", factory.createArrayLiteralExpression(context.listeners.map(makeListenerExpression), true)),
+    ...(hasComponents ? [objectProperty("components", factory.createArrayLiteralExpression(context.components.map(makeComponentExpression), true))] : []),
   ], true);
   const instantiate = factory.createArrowFunction(
     undefined,
@@ -651,7 +764,7 @@ function makeViewExpression(
   );
   return factory.createObjectLiteralExpression([
     objectProperty("protocol", stringExpression("ruseact.template")),
-    objectProperty("version", factory.createNumericLiteral(1)),
+    objectProperty("version", factory.createNumericLiteral(hasComponents ? 2 : 1)),
     objectProperty("templateId", stringExpression(templateId)),
     objectProperty("instantiate", instantiate),
   ], true);
@@ -716,11 +829,14 @@ export function compileTsxModule(source: string, options: CompileOptions = {}): 
             nodes: [],
             bindings: [],
             listeners: [],
+            components: [],
             nodeMetadata: [],
             slotMetadata: [],
             nextNode: 0,
             nextBinding: 0,
             nextListener: 0,
+            nextComponent: 0,
+            nextOrderByParent: new Map(),
           };
           report(planContext, node, "unsupported_fragment", "JSX fragments are not supported in the static M4.3 subset");
         }
@@ -732,13 +848,16 @@ export function compileTsxModule(source: string, options: CompileOptions = {}): 
         nodes: [],
         bindings: [],
         listeners: [],
+        components: [],
         nodeMetadata: [],
         slotMetadata: [],
         nextNode: 0,
         nextBinding: 0,
         nextListener: 0,
+        nextComponent: 0,
+        nextOrderByParent: new Map(),
       };
-      parseElement(planContext, node, undefined);
+      parseJsxNode(planContext, node, undefined);
       const templateSource = source.slice(node.getStart(sourceFile), node.getEnd());
       const templateId = `m4.3-${hashTemplate(`${fileName}\0${templateSource}`)}`;
       return makeViewExpression(planContext, templateId);
@@ -775,11 +894,14 @@ export function compileTsxModule(source: string, options: CompileOptions = {}): 
     nodes: [],
     bindings: [],
     listeners: [],
+    components: [],
     nodeMetadata: [],
     slotMetadata: [],
     nextNode: 0,
     nextBinding: 0,
     nextListener: 0,
+    nextComponent: 0,
+    nextOrderByParent: new Map(),
   };
   const firstJsx = (() => {
     let result: ts.JsxElement | ts.JsxSelfClosingElement | undefined;
@@ -795,7 +917,7 @@ export function compileTsxModule(source: string, options: CompileOptions = {}): 
     return result;
   })();
   if (firstJsx !== undefined) {
-    parseElement(metadataContext, firstJsx, undefined);
+    parseJsxNode(metadataContext, firstJsx, undefined);
   }
   return {
     ok: true,

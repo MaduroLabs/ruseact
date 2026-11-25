@@ -1007,3 +1007,30 @@ raw samples, summaries, and integrity state; unresolved measurements remain
 unresolved rather than being converted into performance values. M3.5 hands
 future work the evidence needed for renderer profiling while leaving public
 lifecycle, compiler, component, and scheduling approval decisions open.
+
+## 24. M4.4.3 conditional-region implementation note
+
+The conditional-region proposal above is now implemented only at the approved
+M4.4.3 scope. Version-3 plans use two private comment anchors per region, an
+explicit single-signal boolean selector, and lazy true/false branch factories.
+The anchors are ordinary renderer-owned host records internally, but arbitrary
+comment creation remains outside the public API. The host validates comment
+ownership, document identity, parentage, ordering, staged ancestry, and
+detachment just as it validates other renderer nodes.
+
+Branch changes are cleanup-first and child-first. The old branch is disposed
+before a fresh activation is created; inactive branches are not cached. An
+unchanged selector does not execute a factory or mutate the range. Selector
+records share the scalar binding dispatcher and Rust pending queue. A later
+exact snapshot computation that was successfully disposed by the structural
+update may be skipped and reported through `FlushReport.skippedCount`; unknown
+or unverified records remain errors. Generated work is deferred to a later
+explicit flush.
+
+The private compiler marker is
+`ruseact.conditional([signal], evaluator, whenTrue, whenFalse)`. It is not a
+general JSX conditional transform or a permanent public authoring contract.
+The focused real-browser command is
+`corepack pnpm test:browser:conditional`. Keyed lists, automatic tracking,
+scheduling, recursive draining, and arbitrary public anchor manipulation
+remain deferred.

@@ -854,3 +854,52 @@ spreads, hooks, and implicit dependencies. Conditional regions, anchors,
 structural computations, keyed lists, rerendering, and scheduling remain
 deferred to separately approved milestones. See
 [docs/m4.4.2-function-components.md](m4.4.2-function-components.md).
+
+## Decision 30: M4.4.3 implements approved conditional structural regions
+
+M4.4.3 extends the existing renderer with `ruseact.template` protocol version
+3. Version 1 static plans and version 2 component plans remain valid and use
+the same root, host, ownership, and binding pipeline. Version 3 adds only
+explicit conditional regions; keyed lists and other future structural
+capabilities are not accepted.
+
+A conditional region owns two private renderer-created `Comment` anchors. The
+host validates their document, ownership context, parent, ancestry, and order
+like other owned nodes, but does not expose arbitrary comment creation through
+the public API. Anchors are not valid scalar binding targets. A region's
+content is the verified owned range strictly between its stable start and end
+anchors, so unrelated siblings are not adopted or removed.
+
+Each region has exactly one explicit `SignalHandle` selector dependency. Its
+JavaScript evaluator must return a structured boolean result; truthiness
+coercion and automatic dependency tracking are rejected. Only the selected
+branch factory executes. An unchanged selector preserves the branch,
+component setup, listeners, and DOM identities.
+
+Changed selection uses cleanup-first replacement. The active branch owner and
+its descendants, bindings, subscriptions, listeners, and DOM resources are
+disposed child-first. A fresh branch activation is then created between the
+existing anchors. Returning to a previous boolean value creates a new
+activation; inactive branches are not cached. If new branch initialization
+fails after old cleanup, renderer-managed new resources are rolled back and the
+region remains safely empty with its anchors preserved. Incomplete cleanup
+retains ownership and fails closed; arbitrary application side effects are not
+claimed to be transactional.
+
+Structural records share `BindingContext` with scalar bindings. They use real
+RustReactiveCore computation identities, explicit subscriptions, the existing
+FIFO pending snapshot, and one manual `root.flush()` pass. Before execution,
+the complete pending snapshot is validated. If a structural update
+successfully disposes a later exact snapshot record, that record may be
+skipped and is counted in `FlushReport.skippedCount`. Foreign, malformed,
+unknown, unexpectedly missing, or unsuccessfully disposed records still fail
+closed. Newly generated work remains deferred and no second queue, scheduler,
+ReactiveCore, or WASM ABI is introduced.
+
+The private compiler marker
+`ruseact.conditional([signal], evaluator, whenTrue, whenFalse)` is provisional
+and emits version 3 only when conditional metadata is present. It does not
+make arbitrary JSX ternaries reactive or infer dependencies. The authoritative
+browser command is `corepack pnpm test:browser:conditional`; hosted Chromium
+must verify the real Rust/WASM-to-DOM path before this feature is considered
+complete. Keyed-list identity and equality remain the M4.4.4 handoff.

@@ -41,6 +41,8 @@ export interface HostContext {
   assertOwned(node: Node): void;
   createElement(name: string, namespace?: string): Element;
   createTextNode(text: string): Text;
+  /** Private structural sentinel; never exposed from the public renderer API. */
+  createAnchor(): Comment;
   insertBefore(parent: Node, child: Node, anchor?: Node | null): void;
   appendChild(parent: Node, child: Node): void;
   removeChild(parent: Node, child: Node): void;
@@ -95,7 +97,9 @@ function isContainer(node: Node): boolean {
 }
 
 function isInsertableChild(node: Node): boolean {
-  return nodeType(node) === Node.ELEMENT_NODE || nodeType(node) === Node.TEXT_NODE;
+  return nodeType(node) === Node.ELEMENT_NODE ||
+    nodeType(node) === Node.TEXT_NODE ||
+    nodeType(node) === Node.COMMENT_NODE;
 }
 
 function tagName(element: Element): string {
@@ -395,6 +399,16 @@ export function createHostContext(document: Document): HostContext {
     return node;
   }
 
+  function createAnchor(): Comment {
+    active("create_anchor");
+    if (typeof document.createComment !== "function") {
+      throw hostError("invalid_node", "create_anchor", "the document cannot create comment anchors");
+    }
+    const anchor = document.createComment("ruseact:conditional");
+    registerNode(anchor, "created", true);
+    return anchor;
+  }
+
   function insertBefore(parent: Node, child: Node, anchor: Node | null = null): void {
     const parentRecord = owned(parent, "insert_before");
     if (!isContainer(parentRecord.node)) {
@@ -402,7 +416,7 @@ export function createHostContext(document: Document): HostContext {
     }
     const childRecord = owned(child, "insert_before");
     if (!isInsertableChild(childRecord.node)) {
-      throw hostError("invalid_parent_child", "insert_before", "only owned elements and text nodes may be inserted");
+      throw hostError("invalid_parent_child", "insert_before", "only owned elements, text nodes, and private anchors may be inserted");
     }
     if (childRecord.node === parentRecord.node) {
       throw hostError("invalid_parent_child", "insert_before", "a node cannot contain itself");
@@ -703,6 +717,7 @@ export function createHostContext(document: Document): HostContext {
     assertOwned,
     createElement,
     createTextNode,
+    createAnchor,
     insertBefore,
     appendChild,
     removeChild,

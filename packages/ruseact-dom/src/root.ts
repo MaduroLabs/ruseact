@@ -10,6 +10,8 @@ import {
   type BindingContext,
   type BindingFlushReport,
   type BindingRegistration,
+  type StructuralHandle,
+  type StructuralRegistration,
 } from "./bindings.js";
 import { createHostContext, type HostContext } from "./host.js";
 
@@ -36,6 +38,8 @@ export interface RootMountScope {
   readonly container: RootContainer;
   readonly createElement: HostContext["createElement"];
   readonly createTextNode: HostContext["createTextNode"];
+  readonly createAnchor: HostContext["createAnchor"];
+  readonly assertOwned: HostContext["assertOwned"];
   readonly insertBefore: HostContext["insertBefore"];
   readonly appendChild: HostContext["appendChild"];
   readonly removeChild: HostContext["removeChild"];
@@ -49,6 +53,10 @@ export interface RootMountScope {
     registration: BindingRegistration,
   ) => CoreResult<BindingHandle>;
   readonly disposeBinding: (binding: BindingHandle) => CoreResult<void>;
+  readonly registerStructural: (
+    registration: StructuralRegistration,
+  ) => CoreResult<StructuralHandle>;
+  readonly disposeStructural: (structural: StructuralHandle) => CoreResult<void>;
   /** Internal renderer cleanup registration; not exported from ruseact-dom. */
   readonly registerCleanup: (cleanup: () => CoreResult<unknown> | void) => void;
 }
@@ -328,6 +336,8 @@ export function createRootContext(
       container,
       createElement: (name, namespace) => rootHost.createElement(name, namespace),
       createTextNode: (text) => rootHost.createTextNode(text),
+      createAnchor: () => rootHost.createAnchor(),
+      assertOwned: (node) => rootHost.assertOwned(node),
       insertBefore: (parent, child, anchor) => rootHost.insertBefore(parent, child, anchor),
       appendChild: (parent, child) => rootHost.appendChild(parent, child),
       removeChild: (parent, child) => rootHost.removeChild(parent, child),
@@ -343,6 +353,8 @@ export function createRootContext(
         rootHost.removeEventListener(element, type, listener, options),
       registerBinding: (registration) => bindings.registerBinding(registration),
       disposeBinding: (binding) => bindings.disposeBinding(binding),
+      registerStructural: (registration) => bindings.registerStructural(registration),
+      disposeStructural: (structural) => bindings.disposeStructural(structural),
       registerCleanup: (cleanupRegistration) => {
         if (typeof cleanupRegistration !== "function") {
           throw rootError("invalid_mount", "register_cleanup", "cleanup must be a function");

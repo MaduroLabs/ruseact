@@ -14,6 +14,13 @@ ABI.
 Ruseact remains an experimental React-inspired framework. This proposal does
 not claim React API compatibility or performance superiority.
 
+Implementation status note: the original M4.1 recommendations are historical
+design input, not an independent protocol. M4.2 implemented version 1 and
+M4.4.2 implemented version 2 static component placement. M4.4.3 uses version
+3 for conditional regions so the changed anchor, branch ownership, rollback,
+and flush semantics are not silently added to older plans. Version 3 remains
+narrow and does not include keyed lists or a mutable view tree.
+
 ## 1. Executive summary
 
 The recommended path is a small public façade over the existing internal root

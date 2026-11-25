@@ -122,6 +122,41 @@ try {
   assert.equal(repeatedComponents.ok, true);
   assert.equal(repeatedComponents.code, componentResult.code, "component output must be deterministic");
 
+  const conditionalSource = `export function createView({ visible }) {
+  return <main><header>Header</header>{ruseact.conditional(
+    [visible],
+    ({ runtime }) => runtime.get(visible).ok
+      ? { ok: true, value: runtime.get(visible).value === true }
+      : runtime.get(visible),
+    () => <p>Visible</p>,
+    () => null
+  )}<footer>Footer</footer></main>;
+}`;
+  const conditionalResult = compiler.compileTsxModule(conditionalSource, { fileName: "conditional.tsx" });
+  assert.equal(conditionalResult.ok, true, JSON.stringify(conditionalResult));
+  assert.equal(conditionalResult.metadata.slots.find((slot) => slot.kind === "conditional")?.id, "r0");
+  const conditionalModulePath = path.join(temporaryRoot, "conditional-view.mjs");
+  writeFileSync(conditionalModulePath, conditionalResult.code);
+  const conditionalModule = await import(pathToFileURL(conditionalModulePath));
+  const visible = {};
+  const conditionalView = conditionalModule.createView({ visible });
+  assert.equal(conditionalView.version, 3);
+  const conditionalPlan = conditionalView.instantiate({ runtime: {} });
+  assert.equal(conditionalPlan.conditions.length, 1);
+  assert.deepEqual(conditionalPlan.conditions[0].dependencies, [visible]);
+  const falseResult = conditionalPlan.conditions[0].evaluate({ runtime: { get() { return { ok: true, value: false }; } } });
+  assert.deepEqual(falseResult, { ok: true, value: false });
+  const trueResult = conditionalPlan.conditions[0].evaluate({ runtime: { get() { return { ok: true, value: true }; } } });
+  assert.deepEqual(trueResult, { ok: true, value: true });
+  const trueBranch = conditionalPlan.conditions[0].whenTrue({ runtime: {}, identity: "r0/activation-0" });
+  assert.equal(trueBranch.ok, true, "branch factory returns a structured result");
+  assert.equal(trueBranch.value.nodes[0].name, "p", "branch factory materializes its plan lazily");
+
+  const conditionalRepeat = compiler.compileTsxModule(conditionalSource, { fileName: "conditional.tsx" });
+  assert.equal(conditionalRepeat.ok, true);
+  assert.equal(conditionalRepeat.code, conditionalResult.code, "conditional output must be deterministic");
+  assertFailure(compiler.compileTsxModule("const view = <div>{ruseact.conditional([], () => ({ ok: true, value: true }), () => <b />, () => null)}</div>;", { fileName: "conditional-dependency.tsx" }), "invalid_conditional_dependency");
+
   assertFailure(compiler.compileTsxModule("const view = <components.name />;", { fileName: "dynamic-component.tsx" }), "unsupported_dynamic_component");
   assertFailure(compiler.compileTsxModule("const view = <Counter><span /></Counter>;", { fileName: "component-children.tsx" }), "unsupported_component_children");
   assertFailure(compiler.compileTsxModule("const view = <Counter {...props} />;", { fileName: "component-spread.tsx" }), "unsupported_spread_attribute");
@@ -136,7 +171,7 @@ try {
   assert.equal(located.ok ? undefined : located.diagnostics[0].location.fileName, "located.tsx");
   assert.equal(located.ok ? undefined : located.diagnostics[0].location.line, 1);
 
-  console.log("M4.3/M4.4.2 compiler tests passed: static plans, bindings, component placements, diagnostics, and deterministic output");
+  console.log("M4.3/M4.4.3 compiler tests passed: static plans, components, conditional plans, diagnostics, and deterministic output");
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

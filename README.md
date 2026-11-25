@@ -54,7 +54,8 @@ API compatibility is claimed.
 | M3.5 — End-to-end DOM integration and benchmark | Complete; hosted Chromium correctness and benchmark integrity passed |
 | M4.1 — Public renderer and compiler contract design | Complete; M4.2 subset approved |
 | M4.2 — Public renderer MVP | Complete; hosted Chromium verification passed |
-| M4.3 — JSX/TSX compiler MVP | Implemented; hosted Chromium verification pending |
+| M4.3 — JSX/TSX compiler MVP | Complete; hosted Chromium verification passed |
+| M4.4.1 — Component and structural rendering contract | Design-only proposal; implementation decisions require approval |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
@@ -137,6 +138,12 @@ The Rust reactive core supports:
   signals, add a JSX runtime, implement components, or perform structural
   reconciliation.
 
+- An M4.4.1 design proposal for component identity, hierarchical resource
+  ownership, anchored conditional regions, keyed-only list identity, and their
+  compiler and flush boundaries. This is documentation only: components,
+  structural regions, keyed lists, anchor nodes, and new public contracts are
+  not implemented or exported.
+
 M4.1 defined the renderer/compiler contract and the project owner approved the
 narrow M4.2 subset. M4.2 implements the public root façade over the internal
 lifecycle, static mount plans, explicit binding slots, structured results, and
@@ -146,10 +153,18 @@ existing version-1 plan; its explicit `ruseact.bindText`, `bindAttribute`, and
 Component identity, structural regions, automatic dependency tracking, and
 scheduling remain deferred.
 
+The M4.4.1 proposal in
+[docs/m4.4-component-structural-design.md](docs/m4.4-component-structural-design.md)
+keeps those capabilities deferred while defining alternatives and approval
+gates for M4.4.2–M4.4.4. Its recommended hybrid uses one-shot component setup,
+explicit owner scopes, anchored conditionals, and keyed-only lists. No part of
+that proposal changes the implemented M4.2/M4.3 protocol.
+
 Rust computation execution, automatic dependency tracking, and scheduling are
 not implemented. M3.3 and M3.4 execute explicitly registered JavaScript
-updates only. The public DOM renderer, compiler, browser bundler matrix, and
-worker handle transfer are also not implemented.
+updates only. The public DOM renderer and private compiler are implemented only
+at the narrow M4.2/M4.3 scope described above; a browser bundler matrix,
+worker handle transfer, components, and structural rendering remain deferred.
 
 M3.1 documents a proposed DOM renderer architecture in
 [docs/dom-renderer-design.md](docs/dom-renderer-design.md). The proposal

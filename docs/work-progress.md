@@ -2,10 +2,11 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.3-jsx-compiler`
+- Branch: `feature/m4.4.1-structural-contract`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `fe77b8da03801e6c575b1c0b6e8536abf4d3bc81`
-- Last verified on: Linux x86_64, 2026-11-23 for M4.3 JSX/TSX compiler MVP;
+- Baseline: `origin/develop` at `10c36cb52e62163ab0ad60ac4fa6b6fbf844d888`
+- Last verified on: Linux x86_64, 2026-11-25 for M4.4.1 component and
+  structural rendering contract design;
   M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
   integrity passed before this implementation branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
@@ -171,6 +172,12 @@
 - [x] Added compiler unit/snapshot-style tests and a real-WASM Chromium
   compiled Hello World and Counter fixture. Hosted browser verification remains
   the authoritative final check for this branch.
+- [x] Audited the verified M4.2 public renderer and M4.3 compiler contracts for
+  component and structural rendering boundaries without changing production
+  code.
+- [x] Documented the proposed M4.4 component identity, hierarchical ownership,
+  anchored conditional, keyed-list, structural computation, error/rollback,
+  compiler compatibility, testing, benchmark, decision, and roadmap contracts.
 
 ## In progress / next
 
@@ -204,8 +211,10 @@
   component, structural, and scheduling extensions remain deferred.
 - [x] Run hosted Chromium public-renderer verification and promote the M4.2
   implementation through PR #48 into `develop` and PR #49 into `main`.
-- [ ] Obtain human review of the M4.3 compiler implementation PR before any
-  promotion.
+- [x] Complete the M4.3 compiler implementation through PR #50 into `develop`
+  and promotion PR #51 into `main`; hosted Chromium verification passed.
+- [ ] Obtain human architecture approval for the M4.4.1 component and
+  structural contract before starting M4.4.2.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.

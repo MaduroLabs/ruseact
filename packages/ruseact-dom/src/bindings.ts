@@ -39,6 +39,12 @@ export interface BindingRegistration {
   readonly key?: string;
 }
 
+export interface StructuralRegistration {
+  readonly dependencies: readonly SignalHandle<SupportedScalar>[];
+  readonly update: () => CoreResult<unknown>;
+  readonly key?: string;
+}
+
 export interface BindingFlushReport {
   readonly drainedCount: number;
   readonly executedCount: number;
@@ -50,6 +56,8 @@ export interface BindingFlushReport {
 export interface BindingContext {
   registerBinding(registration: BindingRegistration): CoreResult<BindingHandle>;
   disposeBinding(binding: BindingHandle): CoreResult<void>;
+  registerStructural(registration: StructuralRegistration): CoreResult<StructuralHandle>;
+  disposeStructural(structural: StructuralHandle): CoreResult<void>;
   flush(): CoreResult<BindingFlushReport>;
   dispose(): CoreResult<void>;
 }
@@ -63,7 +71,17 @@ export class BindingHandle {
   }
 }
 
+/** Internal opaque structural computation identity. */
+export class StructuralHandle {
+  private constructor() {}
+
+  static create(): StructuralHandle {
+    return new StructuralHandle();
+  }
+}
+
 interface BindingRecord {
+  readonly kind: "binding";
   readonly binding: BindingHandle;
   readonly computation: ComputationHandle;
   readonly dependencies: readonly SignalHandle<SupportedScalar>[];
@@ -71,7 +89,21 @@ interface BindingRecord {
   readonly key: string;
   readonly update: () => CoreResult<unknown>;
   live: boolean;
+  cleanupFailed: boolean;
 }
+
+interface StructuralRecord {
+  readonly kind: "structural";
+  readonly structural: StructuralHandle;
+  readonly computation: ComputationHandle;
+  readonly dependencies: readonly SignalHandle<SupportedScalar>[];
+  readonly key: string;
+  readonly update: () => CoreResult<unknown>;
+  live: boolean;
+  cleanupFailed: boolean;
+}
+
+type DispatchRecord = BindingRecord | StructuralRecord;
 
 interface ProgressFields {
   readonly pendingCount: number;
@@ -238,9 +270,13 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
   let context!: BindingContext;
   let disposed = false;
   let flushing = false;
-  const recordsByComputation = new Map<ComputationHandle, BindingRecord>();
+  const recordsByComputation = new Map<ComputationHandle, DispatchRecord>();
   const recordsByBinding = new Map<BindingHandle, BindingRecord>();
+  const recordsByStructural = new Map<StructuralHandle, StructuralRecord>();
   const keysByTarget = new Map<Node, Set<string>>();
+  const structuralKeys = new Set<string>();
+  let flushSnapshot: readonly DispatchRecord[] | undefined;
+  const disposedDuringFlush = new Set<ComputationHandle>();
 
   function contextFailure<T>(code: BindingErrorCode, operation: string, message: string): CoreResult<T> {
     return failure(internalError(code, operation, message));
@@ -264,35 +300,50 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     }
   }
 
-  function cleanupRecord(record: BindingRecord): CoreResult<void> {
+  function cleanupRecord(record: DispatchRecord): CoreResult<void> {
     if (!record.live) {
-      return success(undefined);
+      return record.cleanupFailed
+        ? failure(internalError("binding_cleanup_failed", "dispose_binding", "record cleanup previously failed"))
+        : success(undefined);
     }
     record.live = false;
     recordsByComputation.delete(record.computation);
-    recordsByBinding.delete(record.binding);
-    freeKey(record);
+    if (record.kind === "binding") {
+      recordsByBinding.delete(record.binding);
+      freeKey(record);
+    } else {
+      recordsByStructural.delete(record.structural);
+      structuralKeys.delete(record.key);
+    }
 
     let firstError: CoreError | undefined;
     for (const dependency of record.dependencies) {
-      const unsubscribed = callCore("unsubscribe_binding", () => runtime.unsubscribe(dependency, record.computation));
+      const unsubscribed = callCore(
+        record.kind === "binding" ? "unsubscribe_binding" : "unsubscribe_structural",
+        () => runtime.unsubscribe(dependency, record.computation),
+      );
       if (!unsubscribed.ok && firstError === undefined) {
         firstError = unsubscribed.error;
       }
     }
     const disposedComputation = callCore(
-      "dispose_binding_computation",
+      record.kind === "binding" ? "dispose_binding_computation" : "dispose_structural_computation",
       () => runtime.disposeComputation(record.computation),
     );
     if (!disposedComputation.ok && firstError === undefined) {
       firstError = disposedComputation.error;
     }
-    return firstError === undefined
-      ? success(undefined)
-      : failure({
+    if (firstError === undefined) {
+      if (flushSnapshot?.includes(record) === true) {
+        disposedDuringFlush.add(record.computation);
+      }
+      return success(undefined);
+    }
+    record.cleanupFailed = true;
+    return failure({
         ...firstError,
         code: "binding_cleanup_failed",
-        operation: "dispose_binding",
+        operation: record.kind === "binding" ? "dispose_binding" : "dispose_structural",
         resource: "computation",
       });
   }
@@ -304,25 +355,31 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     return callHost(operation, () => host.assertOwned(target));
   }
 
-  function execute(record: BindingRecord, progress?: ProgressFields): CoreResult<void> {
-    const target = validateTarget(record.target, "binding_target");
-    if (!target.ok) {
-      return failure(progress === undefined ? target.error : progressError(target.error, progress));
+  function execute(record: DispatchRecord, progress?: ProgressFields): CoreResult<void> {
+    if (record.kind === "binding") {
+      const target = validateTarget(record.target, "binding_target");
+      if (!target.ok) {
+        return failure(progress === undefined ? target.error : progressError(target.error, progress));
+      }
     }
 
     let result: unknown;
     try {
       result = record.update();
     } catch (error) {
-      const converted = errorFromThrown(error, "execute_binding", progress);
+      const converted = errorFromThrown(
+        error,
+        record.kind === "binding" ? "execute_binding" : "execute_structural",
+        progress,
+      );
       return failure(converted);
     }
     if (!isCoreResult(result)) {
       return failure(
         internalError(
           "invalid_update_result",
-          "execute_binding",
-          "binding update must return a CoreResult",
+          record.kind === "binding" ? "execute_binding" : "execute_structural",
+          `${record.kind} update must return a CoreResult`,
           progress,
         ),
       );
@@ -337,9 +394,6 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     const unavailable = active<BindingHandle>("register_binding");
     if (unavailable !== undefined) {
       return unavailable;
-    }
-    if (flushing) {
-      return contextFailure("context_busy", "register_binding", "binding registration is not allowed during flush");
     }
     if (
       !isObject(registration) ||
@@ -386,6 +440,7 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
 
     const binding = BindingHandle.create();
     const record: BindingRecord = {
+      kind: "binding",
       binding,
       computation: computation.value,
       dependencies,
@@ -393,6 +448,7 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
       key,
       update: registration.update,
       live: true,
+      cleanupFailed: false,
     };
     const initial = execute(record);
     if (!initial.ok) {
@@ -412,17 +468,95 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     return success(binding);
   }
 
+  function registerStructural(registration: StructuralRegistration): CoreResult<StructuralHandle> {
+    const unavailable = active<StructuralHandle>("register_structural");
+    if (unavailable !== undefined) {
+      return unavailable;
+    }
+    if (
+      !isObject(registration) ||
+      typeof registration.update !== "function" ||
+      !Array.isArray(registration.dependencies)
+    ) {
+      return contextFailure("invalid_binding", "register_structural", "structural registration is malformed");
+    }
+    const key = registration.key ?? "structural";
+    if (typeof key !== "string" || key.length === 0) {
+      return contextFailure("invalid_binding", "register_structural", "structural key must be non-empty");
+    }
+    if (structuralKeys.has(key)) {
+      return contextFailure("duplicate_binding", "register_structural", `structural key ${key} is already registered`);
+    }
+
+    const computation = callCore("create_structural_computation", () => runtime.createComputation());
+    if (!computation.ok) {
+      return computation as CoreResult<StructuralHandle>;
+    }
+    const dependencies = Array.from(registration.dependencies);
+    const replaced = callCore(
+      "replace_structural_dependencies",
+      () => runtime.replaceDependencies(computation.value, dependencies),
+    );
+    if (!replaced.ok) {
+      const cleanup = callCore(
+        "dispose_failed_structural_computation",
+        () => runtime.disposeComputation(computation.value),
+      );
+      return cleanup.ok ? replaced as CoreResult<StructuralHandle> : failure({
+        ...replaced.error,
+        code: "binding_cleanup_failed",
+        operation: "register_structural",
+        resource: "computation",
+      });
+    }
+
+    const structural = StructuralHandle.create();
+    const record: StructuralRecord = {
+      kind: "structural",
+      structural,
+      computation: computation.value,
+      dependencies,
+      key,
+      update: registration.update,
+      live: true,
+      cleanupFailed: false,
+    };
+    structuralKeys.add(key);
+    recordsByComputation.set(record.computation, record);
+    recordsByStructural.set(structural, record);
+    const initial = execute(record);
+    if (!initial.ok) {
+      const cleanup = cleanupRecord(record);
+      return cleanup.ok ? initial as CoreResult<StructuralHandle> : failure({
+        ...initial.error,
+        code: "binding_cleanup_failed",
+        operation: "register_structural",
+        resource: "computation",
+      });
+    }
+    return success(structural);
+  }
+
   function disposeBinding(binding: BindingHandle): CoreResult<void> {
     const unavailable = active<void>("dispose_binding");
     if (unavailable !== undefined) {
       return unavailable;
     }
-    if (flushing) {
-      return contextFailure("context_busy", "dispose_binding", "binding disposal is not allowed during flush");
-    }
     const record = recordsByBinding.get(binding);
     if (record === undefined) {
       return contextFailure("invalid_binding", "dispose_binding", "binding is unknown or already disposed");
+    }
+    return cleanupRecord(record);
+  }
+
+  function disposeStructural(structural: StructuralHandle): CoreResult<void> {
+    const unavailable = active<void>("dispose_structural");
+    if (unavailable !== undefined) {
+      return unavailable;
+    }
+    const record = recordsByStructural.get(structural);
+    if (record === undefined) {
+      return contextFailure("invalid_binding", "dispose_structural", "structural computation is unknown or already disposed");
     }
     return cleanupRecord(record);
   }
@@ -437,13 +571,14 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     }
 
     flushing = true;
+    disposedDuringFlush.clear();
     try {
       const drained = callCore("drain_pending_bindings", () => runtime.drainPendingComputations());
       if (!drained.ok) {
         return drained as CoreResult<BindingFlushReport>;
       }
       const pending = Array.from(drained.value);
-      const records: BindingRecord[] = [];
+      const records: DispatchRecord[] = [];
       for (let index = 0; index < pending.length; index += 1) {
         const record = recordsByComputation.get(pending[index]);
         if (record === undefined || !record.live) {
@@ -459,6 +594,9 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
         records.push(record);
       }
 
+      flushSnapshot = records;
+      let executedCount = 0;
+      let skippedCount = 0;
       for (let index = 0; index < records.length; index += 1) {
         const record = records[index];
         const progress: ProgressFields = {
@@ -466,24 +604,45 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
           processedCount: index,
           remainingCount: records.length - index - 1,
         };
+        if (!record.live) {
+          if (disposedDuringFlush.has(record.computation)) {
+            skippedCount += 1;
+            continue;
+          }
+          return failure(
+            internalError(
+              record.cleanupFailed ? "binding_cleanup_failed" : "unknown_pending_binding",
+              "flush",
+              record.cleanupFailed
+                ? "a pending computation failed renderer-managed disposal"
+                : "pending computation is no longer live without verified renderer disposal",
+              progress,
+            ),
+          );
+        }
         const updated = execute(record, progress);
         if (!updated.ok) {
+          if (record.kind === "structural") {
+            return failure(updated.error);
+          }
           const cleanup = cleanupRecord(record);
-          const error = cleanup.ok ? updated.error : {
+          return failure(cleanup.ok ? updated.error : {
             ...updated.error,
             cleanupCode: cleanup.error.code,
-          };
-          return failure(error);
+          } as CoreError);
         }
+        executedCount += 1;
       }
 
       return success({
         drainedCount: records.length,
-        executedCount: records.length,
-        skippedCount: 0,
+        executedCount,
+        skippedCount,
         pendingAfter: "not-inspected",
       });
     } finally {
+      flushSnapshot = undefined;
+      disposedDuringFlush.clear();
       flushing = false;
     }
   }
@@ -499,7 +658,10 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     disposed = true;
     ACTIVE_RUNTIME_CONTEXTS.delete(runtimeObject);
     let firstError: CoreError | undefined;
-    for (const record of Array.from(recordsByBinding.values())) {
+    for (const record of Array.from(new Set<DispatchRecord>([
+      ...recordsByBinding.values(),
+      ...recordsByStructural.values(),
+    ]))) {
       const cleaned = cleanupRecord(record);
       if (!cleaned.ok && firstError === undefined) {
         firstError = cleaned.error;
@@ -507,11 +669,13 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     }
     recordsByComputation.clear();
     recordsByBinding.clear();
+    recordsByStructural.clear();
     keysByTarget.clear();
+    structuralKeys.clear();
     return firstError === undefined ? success(undefined) : failure(firstError);
   }
 
-  context = { registerBinding, disposeBinding, flush, dispose };
+  context = { registerBinding, disposeBinding, registerStructural, disposeStructural, flush, dispose };
   ACTIVE_RUNTIME_CONTEXTS.set(runtimeObject, context);
   return context;
 }

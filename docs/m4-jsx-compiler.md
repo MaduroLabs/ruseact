@@ -92,10 +92,12 @@ The compiler rejects, with source-located diagnostics:
   APIs.
 
 Rejecting these forms is intentional. A stale or structurally incorrect plan
-is worse than a compile-time diagnostic. Conditional regions, keyed identity,
-and dynamic tracking require separately approved contracts. Component setup and
-nested ownership are implemented only at the M4.4.2 one-shot static-placement
-scope.
+is worse than a compile-time diagnostic. General conditional expressions,
+keyed identity, and dynamic tracking remain rejected. Component setup and
+nested ownership are implemented at the M4.4.2 one-shot static-placement
+scope. M4.4.3 additionally accepts only the provisional explicit marker
+`ruseact.conditional([signal], evaluator, whenTrue, whenFalse)` and emits a
+version-3 conditional plan; it does not infer dependencies from arbitrary JSX.
 
 ## Generated module contract
 
@@ -118,6 +120,12 @@ When the plan contains statically named component references, the same
 `ruseact.template` protocol uses version 2 and adds a `components` array of
 `{ kind: "component", id, parentId, order, component, props }` placements.
 Version 1 output remains unchanged for intrinsic-only modules.
+
+When the explicit conditional marker is present, the same protocol uses version
+3 and adds a `conditions` array with one signal dependency, a boolean evaluator,
+and lazy generated branch factories. The inactive branch is not instantiated
+by the compiler or renderer. Version 2 remains the component-only capability
+boundary.
 
 Node IDs (`n0`, `n1`, ...), binding IDs (`b0`, `b1`, ...), listener IDs
 (`l0`, `l1`, ...), and the template hash are deterministic for the source
@@ -151,11 +159,15 @@ RUSEACT_BROWSER_BINDGEN_OUT=target/m4.3-browser-bindgen \
 The hosted Chromium job is authoritative. The fixture compiles Hello World and
 an interactive counter, mounts them through public `createRoot`, verifies
 manual flush boundaries and stable node identity, then verifies listener and
-binding cleanup with the real Rust/WASM runtime.
+binding cleanup with the real Rust/WASM runtime. The separate
+`test:browser:conditional` fixture verifies generated version-3 plans,
+private anchors, branch replacement, rollback, and shared structural/scalar
+flush behavior.
 
 ## Future handoff
 
-M4.4 may consider components and anchored structural regions. It must not infer
-those semantics from this static compiler, and it must preserve the M4.2
-one-shot root, dedicated-runtime, explicit-flush, and structured-result
-contracts until a new approval changes them.
+M4.4.3 has approved and implemented the narrow anchored conditional subset.
+M4.4.4 must separately define keyed identity and preserve the M4.2 one-shot
+root, dedicated-runtime, explicit-flush, and structured-result contracts. No
+future compiler extension may infer reactive dependencies or add structural
+semantics without an explicit protocol and ownership contract.

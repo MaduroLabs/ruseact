@@ -155,7 +155,42 @@ try {
   const conditionalRepeat = compiler.compileTsxModule(conditionalSource, { fileName: "conditional.tsx" });
   assert.equal(conditionalRepeat.ok, true);
   assert.equal(conditionalRepeat.code, conditionalResult.code, "conditional output must be deterministic");
+
+  const keyedSource = `export function createView({ revision, items }) {
+  return <ul>{ruseact.keyed(
+    [revision],
+    ({ runtime }) => ({ ok: true, value: items.map((item) => ({ key: item.id, fields: { label: item.label } })) }),
+    ({ fields }) => <li>{ruseact.bindText([fields.label], ({ runtime: currentRuntime }) => currentRuntime.get(fields.label))}</li>
+  )}</ul>;
+}`;
+  const keyedResult = compiler.compileTsxModule(keyedSource, { fileName: "keyed.tsx" });
+  assert.equal(keyedResult.ok, true, JSON.stringify(keyedResult));
+  assert.match(keyedResult.code, /version: 4/);
+  assert.equal(keyedResult.metadata.slots.find((slot) => slot.kind === "keyed")?.id, "k0");
+  const keyedModulePath = path.join(temporaryRoot, "keyed-view.mjs");
+  writeFileSync(keyedModulePath, keyedResult.code);
+  const keyedModule = await import(pathToFileURL(keyedModulePath));
+  const revision = {};
+  const items = [{ id: 1, label: "one" }];
+  const keyedView = keyedModule.createView({ revision, items });
+  const keyedPlan = keyedView.instantiate({ runtime: {} });
+  assert.equal(keyedView.version, 4);
+  assert.deepEqual(keyedPlan.keyedLists[0].dependencies, [revision]);
+  const keyedEvaluation = keyedPlan.keyedLists[0].evaluate({ runtime: {} });
+  assert.deepEqual(keyedEvaluation, { ok: true, value: [{ key: 1, fields: { label: "one" } }] });
+  const fieldSignal = {};
+  const keyedItem = keyedPlan.keyedLists[0].createItem({
+    runtime: {}, identity: "root/item", key: 1, data: { label: "one" }, fields: { label: fieldSignal },
+  });
+  assert.equal(keyedItem.ok, true);
+  assert.deepEqual(keyedItem.value.bindings[0].dependencies, [fieldSignal]);
+
+  const keyedRepeat = compiler.compileTsxModule(keyedSource, { fileName: "keyed.tsx" });
+  assert.equal(keyedRepeat.ok, true);
+  assert.equal(keyedRepeat.code, keyedResult.code, "keyed output must be deterministic");
+
   assertFailure(compiler.compileTsxModule("const view = <div>{ruseact.conditional([], () => ({ ok: true, value: true }), () => <b />, () => null)}</div>;", { fileName: "conditional-dependency.tsx" }), "invalid_conditional_dependency");
+  assertFailure(compiler.compileTsxModule("const view = <div>{ruseact.keyed([], () => ({ ok: true, value: [] }), ({ fields }) => <b />)}</div>;", { fileName: "keyed-dependency.tsx" }), "invalid_keyed_dependency");
 
   assertFailure(compiler.compileTsxModule("const view = <components.name />;", { fileName: "dynamic-component.tsx" }), "unsupported_dynamic_component");
   assertFailure(compiler.compileTsxModule("const view = <Counter><span /></Counter>;", { fileName: "component-children.tsx" }), "unsupported_component_children");
@@ -171,7 +206,7 @@ try {
   assert.equal(located.ok ? undefined : located.diagnostics[0].location.fileName, "located.tsx");
   assert.equal(located.ok ? undefined : located.diagnostics[0].location.line, 1);
 
-  console.log("M4.3/M4.4.3 compiler tests passed: static plans, components, conditional plans, diagnostics, and deterministic output");
+  console.log("M4.3/M4.4.4 compiler tests passed: static plans, components, conditional/keyed plans, diagnostics, and deterministic output");
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

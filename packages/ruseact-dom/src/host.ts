@@ -12,6 +12,7 @@ interface NodeRecord {
   readonly removable: boolean;
   inserted: boolean;
   detached: boolean;
+  authorizedDetached: boolean;
 }
 
 interface ListenerRecord {
@@ -46,6 +47,8 @@ export interface HostContext {
   insertBefore(parent: Node, child: Node, anchor?: Node | null): void;
   appendChild(parent: Node, child: Node): void;
   removeChild(parent: Node, child: Node): void;
+  /** Retire an owned, currently detached node after a failed staged mount. */
+  retireNode(node: Node): void;
   setText(textNode: Node, value: string): boolean;
   setAttribute(element: Node, name: string, value: string, namespace?: string): boolean;
   removeAttribute(element: Node, name: string, namespace?: string): boolean;
@@ -219,20 +222,33 @@ function markInsertedSubtree(node: Node, context: HostContext): void {
     // ownership boundary; until then it remains a valid staged subtree.
     record.inserted = reachesClaimedContainer(node, context);
     record.detached = false;
+    record.authorizedDetached = false;
   }
   for (const child of Array.from(node.childNodes)) {
     markInsertedSubtree(child, context);
   }
 }
 
-function markDetachedSubtree(node: Node, context: HostContext): void {
+function markDetachedSubtree(node: Node, context: HostContext, authorized: boolean): void {
   const record = NODE_OWNERS.get(node);
   if (record !== undefined && record.context === context) {
     record.inserted = true;
     record.detached = true;
+    record.authorizedDetached = authorized;
   }
   for (const child of Array.from(node.childNodes)) {
-    markDetachedSubtree(child, context);
+    markDetachedSubtree(child, context, authorized);
+  }
+}
+
+function retireSubtree(node: Node, context: HostContext, state: HostState): void {
+  for (const child of Array.from(node.childNodes)) {
+    retireSubtree(child, context, state);
+  }
+  const record = NODE_OWNERS.get(node);
+  if (record?.context === context) {
+    NODE_OWNERS.delete(node);
+    state.nodes.delete(record);
   }
 }
 
@@ -285,7 +301,7 @@ export function createHostContext(document: Document): HostContext {
 
         const parent = top.parentNode;
         if (parent === null) {
-          markDetachedSubtree(top, context);
+          markDetachedSubtree(top, context, false);
           throw hostError(
             "detached_node",
             operation,
@@ -294,7 +310,7 @@ export function createHostContext(document: Document): HostContext {
         }
         const parentRecord = NODE_OWNERS.get(parent);
         if (parentRecord?.context !== context) {
-          markDetachedSubtree(top, context);
+          markDetachedSubtree(top, context, false);
           throw hostError(
             "detached_node",
             operation,
@@ -308,7 +324,7 @@ export function createHostContext(document: Document): HostContext {
       record.node.parentNode !== null &&
       !hasValidStagedAncestors(record.node, context)
     ) {
-      markDetachedSubtree(record.node, context);
+      markDetachedSubtree(record.node, context, false);
       throw hostError(
         "detached_node",
         operation,
@@ -342,6 +358,7 @@ export function createHostContext(document: Document): HostContext {
       removable,
       inserted: false,
       detached: false,
+      authorizedDetached: false,
     });
     state.nodes.add(NODE_OWNERS.get(node)!);
   }
@@ -476,7 +493,26 @@ export function createHostContext(document: Document): HostContext {
         error instanceof Error ? error.message : "browser rejected node removal",
       );
     }
-    markDetachedSubtree(childRecord.node, context);
+    markDetachedSubtree(childRecord.node, context, true);
+  }
+
+  function retireNode(node: Node): void {
+    active("retire_node");
+    const record = NODE_OWNERS.get(node);
+    if (record === undefined) return;
+    if (record.context !== context) {
+      throw hostError("foreign_node", "retire_node", "node belongs to another host context");
+    }
+    if (record.kind === "container") {
+      throw hostError("invalid_node", "retire_node", "a host container cannot be retired");
+    }
+    if (record.inserted && (!record.detached || !record.authorizedDetached)) {
+      throw hostError("detached_node", "retire_node", "a mounted node cannot be retired without an authorized host removal");
+    }
+    if (record.node.parentNode !== null) {
+      throw hostError("invalid_parent_child", "retire_node", "only detached nodes can be retired");
+    }
+    retireSubtree(record.node, context, state);
   }
 
   function setText(textNode: Node, value: string): boolean {
@@ -721,6 +757,7 @@ export function createHostContext(document: Document): HostContext {
     insertBefore,
     appendChild,
     removeChild,
+    retireNode,
     setText,
     setAttribute,
     removeAttribute,

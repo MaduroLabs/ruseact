@@ -2,11 +2,11 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.4.3-conditional-regions`
+- Branch: `feature/m4.4.4-keyed-lists`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `7118157a76239a3573708e8065851f34de82362f`
-- Last verified on: Linux x86_64, 2026-11-25 for M4.4.1 component and
-  conditional structural regions implementation;
+- Baseline: `origin/develop` at `5c3a3785e3e4d237fdc81554b57fd359c94e4336`
+- Last verified on: Linux x86_64, 2026-11-25 for M4.4.4 keyed-list
+  implementation;
   M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
   integrity passed before this implementation branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
@@ -473,3 +473,29 @@
   InstaBox loopback browser limitation prevents claiming local Chromium
   execution. Numeric benchmark results remain CI artifacts until the hosted
   workflow completes; no values are fabricated in this progress record.
+
+## M4.4.4 keyed-list implementation status
+
+- [x] Verified PR #56 is merged into `develop` and PR #57 is merged into
+  `main`; created this branch directly from the verified `origin/develop`
+  baseline.
+- [x] Added version-4 keyed-list plan types with explicit revision
+  dependency, JavaScript collection snapshot, SameValueZero structural keys,
+  lazy item factory, and stable item scalar-field schema.
+- [x] Reused the existing host, ownership, binding, root, and structural
+  dispatch infrastructure for private list/item anchors, retained item
+  ownership, scalar signal updates, right-to-left range movement, and exact
+  same-snapshot disposal.
+- [x] Added the provisional compiler-only `ruseact.keyed` marker and
+  deterministic version-4 output while preserving versions 1–3.
+- [x] Added real-WASM Chromium keyed-list coverage and a bounded keyed-list
+  benchmark/integrity validator. Escalated local Chromium passed 91 keyed
+  checks; hosted CI remains authoritative for the PR.
+- [x] Existing DOM, binding, root, public renderer, compiler, conditional, and
+  M3.5 end-to-end Chromium suites passed in the escalated local harness after
+  preserving fail-closed external-detachment behavior.
+
+The InstaBox default sandbox cannot bind the browser fixture's temporary
+localhost server (`listen EPERM`); no local browser result is claimed without
+the supported escalated harness. M4.5 consumer integration, unkeyed lists,
+implicit tracking, scheduling, and new Rust/WASM ABI remain deferred.

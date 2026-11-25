@@ -1,10 +1,10 @@
-import { SignalHandle } from "../../ruseact/src/handles.js";
+import { SignalHandle } from "ruseact";
 import type {
   CoreError,
   CoreResult,
   ReactiveCore,
   SupportedScalar,
-} from "../../ruseact/src/types.js";
+} from "ruseact";
 import {
   createRootContext,
   type RootLifecycleState,

@@ -74,7 +74,7 @@ function runBrowser(command, args) {
 function browserPage() {
   return String.raw`<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Ruseact M4.4.3 conditional regions</title></head>
+  <head><meta charset="utf-8"><title>Ruseact M4.4.3 conditional regions</title><script type="importmap">{"imports":{"ruseact":"./ruseact/src/index.js"}}</script></head>
   <body data-status="pending">
     <p>Running Ruseact conditional-region checks…</p>
     <script>
@@ -364,11 +364,8 @@ let server;
 const requests = [];
 
 try {
-  execFileSync("corepack", [
-    "pnpm", "exec", "tsc", "--target", "ES2022", "--module", "ESNext",
-    "--moduleResolution", "Bundler", "--strict", "--skipLibCheck", "--declaration", "false",
-    "--noEmit", "false", "--rootDir", "packages", "--outDir", compilerOutput,
-    "packages/ruseact/src/index.ts", "packages/ruseact-dom/src/index.ts", "packages/ruseact-compiler/src/index.ts",
+  execFileSync(process.execPath, [
+    path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), compilerOutput,
   ], { cwd: repositoryRoot, stdio: "inherit" });
   writeFileSync(path.join(compilerOutput, "package.json"), JSON.stringify({ type: "module" }));
   const compiler = await import(pathToFileURL(path.join(compilerOutput, "ruseact-compiler", "src", "index.js")));
@@ -377,11 +374,8 @@ try {
 }`, { fileName: "conditional-browser.tsx" });
   if (!compiled.ok) throw new Error(`conditional compiler fixture failed: ${JSON.stringify(compiled.diagnostics)}`);
   writeFileSync(path.join(temporaryRoot, "compiled_conditional.js"), compiled.code);
-  execFileSync("corepack", [
-    "pnpm", "exec", "tsc", "--target", "ES2022", "--module", "ESNext",
-    "--moduleResolution", "Bundler", "--strict", "--skipLibCheck", "--declaration", "false",
-    "--noEmit", "false", "--rootDir", "packages", "--outDir", temporaryRoot,
-    "packages/ruseact/src/index.ts", "packages/ruseact-dom/src/index.ts",
+  execFileSync(process.execPath, [
+    path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), temporaryRoot,
   ], { cwd: repositoryRoot, stdio: "inherit" });
   writeFileSync(path.join(temporaryRoot, "package.json"), JSON.stringify({ type: "module" }));
   writeFileSync(path.join(temporaryRoot, "index.html"), browserPage());

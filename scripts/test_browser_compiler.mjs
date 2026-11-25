@@ -80,7 +80,7 @@ function runBrowser(command, args) {
 function browserPage() {
   return String.raw`<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Ruseact M4.3 compiler</title></head>
+  <head><meta charset="utf-8"><title>Ruseact M4.3 compiler</title><script type="importmap">{"imports":{"ruseact":"./ruseact/src/index.js"}}</script></head>
   <body data-status="pending">
     <p>Running Ruseact compiler checks…</p>
     <script>
@@ -415,19 +415,8 @@ let server;
 const requests = [];
 try {
   execFileSync(
-    path.join(repositoryRoot, "node_modules", ".bin", "tsc"),
-    [
-      "--target", "ES2022",
-      "--module", "ESNext",
-      "--moduleResolution", "Bundler",
-      "--strict",
-      "--skipLibCheck",
-      "--declaration", "false",
-      "--noEmit", "false",
-      "--rootDir", "packages",
-      "--outDir", compilerOutput,
-      "packages/ruseact-compiler/src/index.ts",
-    ],
+    process.execPath,
+    [path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), compilerOutput],
     { cwd: repositoryRoot, stdio: "inherit" },
   );
   writeFileSync(path.join(compilerOutput, "package.json"), JSON.stringify({ type: "module" }));
@@ -441,20 +430,8 @@ try {
   cpSync(bindingDirectory, generatedRoot, { recursive: true });
 
   execFileSync(
-    path.join(repositoryRoot, "node_modules", ".bin", "tsc"),
-    [
-      "--target", "ES2022",
-      "--module", "ESNext",
-      "--moduleResolution", "Bundler",
-      "--strict",
-      "--skipLibCheck",
-      "--declaration", "false",
-      "--noEmit", "false",
-      "--rootDir", "packages",
-      "--outDir", temporaryRoot,
-      "packages/ruseact/src/index.ts",
-      "packages/ruseact-dom/src/index.ts",
-    ],
+    process.execPath,
+    [path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), temporaryRoot],
     { cwd: repositoryRoot, stdio: "inherit" },
   );
   writeFileSync(path.join(temporaryRoot, "index.html"), browserPage());

@@ -136,6 +136,22 @@ jobs:
         env:
           RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.4-browser-bindgen
         run: pnpm test:browser:e2e
+      - name: Build experimental package distribution
+        run: corepack pnpm build:distribution
+      - name: Pack and validate experimental packages
+        run: |
+          corepack pnpm pack:packages
+          corepack pnpm validate:distribution
+      - name: Verify isolated installed package consumer
+        run: corepack pnpm test:packages
+      - name: Upload package distribution artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruseact-m4.5.1-distribution-${{ github.sha }}
+          path: target/distribution
+          if-no-files-found: warn
+          retention-days: 14
 
   benchmark:
     name: Benchmark (M2.5)

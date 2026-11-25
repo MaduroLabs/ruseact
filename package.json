@@ -17,6 +17,7 @@
     "test:browser:public": "node scripts/test_browser_public_renderer.mjs",
     "test:browser:compiler": "node scripts/test_browser_compiler.mjs",
     "test:browser:conditional": "node scripts/test_browser_conditional.mjs",
+    "test:browser:keyed": "node scripts/test_browser_keyed.mjs",
     "test:compiler": "node scripts/test_compiler.mjs",
     "test:browser:e2e": "node scripts/test_browser_e2e.mjs",
     "test:benchmark:calibration": "node scripts/test_benchmark_calibration.mjs",
@@ -24,6 +25,8 @@
     "benchmark:browser": "node scripts/benchmark_browser_runtime.mjs",
     "benchmark:validate": "node scripts/validate_benchmark_results.mjs",
     "benchmark:browser:dom": "node scripts/benchmark_dom_e2e.mjs",
+    "benchmark:browser:keyed": "node scripts/benchmark_keyed_lists.mjs",
+    "benchmark:keyed:validate": "node scripts/validate_keyed_benchmark_results.mjs",
     "benchmark:dom:validate": "node scripts/validate_dom_benchmark_results.mjs"
   },
   "devDependencies": {

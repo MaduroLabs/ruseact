@@ -24,7 +24,7 @@ export interface CompilerNodeMetadata {
 
 export interface CompilerSlotMetadata {
   readonly id: string;
-  readonly kind: "text" | "attribute" | "property" | "listener" | "component" | "conditional";
+  readonly kind: "text" | "attribute" | "property" | "listener" | "component" | "conditional" | "keyed";
   readonly location: CompilerSourceLocation;
 }
 
@@ -95,6 +95,17 @@ interface ConditionalPlan {
   readonly whenFalse: BranchPlan;
 }
 
+interface KeyedPlan {
+  readonly id: string;
+  readonly parentId?: string;
+  readonly order: number;
+  readonly sourceNode: ts.Node;
+  readonly dependencies: readonly ts.Expression[];
+  readonly evaluator: ts.ArrowFunction | ts.FunctionExpression;
+  readonly itemFactory: ts.ArrowFunction | ts.FunctionExpression;
+  readonly itemView: BranchPlan;
+}
+
 interface BindingPlan {
   readonly kind: BindingKind;
   readonly slot: string;
@@ -129,6 +140,7 @@ interface PlanBuilderContext {
   readonly listeners: ListenerPlan[];
   readonly components: ComponentPlan[];
   readonly conditions: ConditionalPlan[];
+  readonly keyedLists: KeyedPlan[];
   readonly nodeMetadata: CompilerNodeMetadata[];
   readonly slotMetadata: CompilerSlotMetadata[];
   nextNode: number;
@@ -136,6 +148,7 @@ interface PlanBuilderContext {
   nextListener: number;
   nextComponent: number;
   nextRegion: number;
+  nextKeyed: number;
   readonly nextOrderByParent: Map<string, number>;
 }
 
@@ -155,6 +168,7 @@ function createPlanBuilderContext(
     listeners: [],
     components: [],
     conditions: [],
+    keyedLists: [],
     nodeMetadata: [],
     slotMetadata: [],
     nextNode: 0,
@@ -162,6 +176,7 @@ function createPlanBuilderContext(
     nextListener: 0,
     nextComponent: 0,
     nextRegion: 0,
+    nextKeyed: 0,
     nextOrderByParent: new Map(),
   };
 }
@@ -390,6 +405,59 @@ function parseConditionalMarker(
   return true;
 }
 
+function parseKeyedMarker(
+  context: PlanBuilderContext,
+  node: ts.Expression,
+  parentId: string | undefined,
+): boolean {
+  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) {
+    return false;
+  }
+  const receiver = node.expression.expression;
+  if (!ts.isIdentifier(receiver) || receiver.text !== compilerMarkerObject || node.expression.name.text !== "keyed") {
+    return false;
+  }
+  if (node.arguments.length !== 3 || !ts.isArrayLiteralExpression(node.arguments[0])) {
+    report(context, node, "invalid_keyed_marker", "ruseact.keyed requires one dependency array, collection evaluator, and item factory");
+    return true;
+  }
+  const dependencies = node.arguments[0].elements;
+  if (dependencies.length !== 1 || dependencies.some((dependency) => !ts.isExpression(dependency) || !isSimpleDependency(dependency))) {
+    report(context, node.arguments[0], "invalid_keyed_dependency", "keyed lists require exactly one explicit revision signal reference");
+    return true;
+  }
+  const evaluator = node.arguments[1];
+  if (!ts.isArrowFunction(evaluator) && !ts.isFunctionExpression(evaluator)) {
+    report(context, evaluator, "invalid_keyed_evaluator", "keyed-list collection evaluators must be arrow or function expressions");
+    return true;
+  }
+  const itemFactory = node.arguments[2];
+  if (!ts.isArrowFunction(itemFactory) && !ts.isFunctionExpression(itemFactory)) {
+    report(context, itemFactory, "invalid_item_factory", "keyed-list item factories must be arrow or function expressions");
+    return true;
+  }
+  if (itemFactory.parameters.length !== 1) {
+    report(context, itemFactory, "invalid_item_factory", "keyed-list item factories require one environment parameter");
+    return true;
+  }
+  const itemView = parseBranchPlan(context, itemFactory);
+  if (itemView === undefined) return true;
+  const id = `k${context.nextKeyed}`;
+  context.nextKeyed += 1;
+  context.keyedLists.push({
+    id,
+    ...(parentId === undefined ? {} : { parentId }),
+    order: nextOrder(context, parentId),
+    sourceNode: node,
+    dependencies,
+    evaluator,
+    itemFactory,
+    itemView,
+  });
+  addSlotMetadata(context, id, "keyed", node);
+  return true;
+}
+
 function addNodeMetadata(context: PlanBuilderContext, node: NodePlan): void {
   context.nodeMetadata.push({
     id: node.id,
@@ -604,6 +672,9 @@ function parseChild(context: PlanBuilderContext, child: ts.JsxChild, parentId: s
     }
     if (ts.isNumericLiteral(expression)) {
       addTextNode(context, parentId, expression.text, expression);
+      return;
+    }
+    if (parseKeyedMarker(context, expression, parentId)) {
       return;
     }
     if (parseConditionalMarker(context, expression, parentId)) {
@@ -869,12 +940,14 @@ function makeListenerExpression(listener: ListenerPlan): ts.ObjectLiteralExpress
 function makePlanExpression(context: PlanBuilderContext): ts.ObjectLiteralExpression {
   const hasComponents = context.components.length > 0;
   const hasConditions = context.conditions.length > 0;
+  const hasKeyedLists = context.keyedLists.length > 0;
   return factory.createObjectLiteralExpression([
-    objectProperty("nodes", factory.createArrayLiteralExpression(context.nodes.map((node) => makeStaticNodeExpression(node, hasComponents || hasConditions)), true)),
+    objectProperty("nodes", factory.createArrayLiteralExpression(context.nodes.map((node) => makeStaticNodeExpression(node, hasComponents || hasConditions || hasKeyedLists)), true)),
     objectProperty("bindings", factory.createArrayLiteralExpression(context.bindings.map(makeBindingExpression), true)),
     objectProperty("listeners", factory.createArrayLiteralExpression(context.listeners.map(makeListenerExpression), true)),
-    ...(hasComponents || hasConditions ? [objectProperty("components", factory.createArrayLiteralExpression(context.components.map(makeComponentExpression), true))] : []),
-    ...(hasConditions ? [objectProperty("conditions", factory.createArrayLiteralExpression(context.conditions.map(makeConditionalExpression), true))] : []),
+    ...(hasComponents || hasConditions || hasKeyedLists ? [objectProperty("components", factory.createArrayLiteralExpression(context.components.map(makeComponentExpression), true))] : []),
+    ...(hasConditions || hasKeyedLists ? [objectProperty("conditions", factory.createArrayLiteralExpression(context.conditions.map(makeConditionalExpression), true))] : []),
+    ...(hasKeyedLists ? [objectProperty("keyedLists", factory.createArrayLiteralExpression(context.keyedLists.map(makeKeyedExpression), true))] : []),
   ], true);
 }
 
@@ -924,12 +997,47 @@ function makeConditionalExpression(condition: ConditionalPlan): ts.ObjectLiteral
   return factory.createObjectLiteralExpression(properties, true);
 }
 
+function makeKeyedFactory(keyed: KeyedPlan): ts.ArrowFunction {
+  const plan = keyed.itemView.context === undefined
+    ? makeEmptyPlanExpression()
+    : makePlanExpression(keyed.itemView.context);
+  return factory.createArrowFunction(
+    undefined,
+    undefined,
+    Array.from(keyed.itemFactory.parameters),
+    undefined,
+    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+    factory.createBlock([
+      factory.createReturnStatement(factory.createObjectLiteralExpression([
+        objectProperty("ok", factory.createTrue()),
+        objectProperty("value", plan),
+      ], true)),
+    ], true),
+  );
+}
+
+function makeKeyedExpression(keyed: KeyedPlan): ts.ObjectLiteralExpression {
+  const properties: ts.ObjectLiteralElementLike[] = [
+    objectProperty("kind", stringExpression("keyed")),
+    objectProperty("id", stringExpression(keyed.id)),
+    objectProperty("order", factory.createNumericLiteral(keyed.order)),
+    objectProperty("dependencies", arrayExpression(keyed.dependencies)),
+    objectProperty("evaluate", keyed.evaluator),
+    objectProperty("createItem", makeKeyedFactory(keyed)),
+  ];
+  if (keyed.parentId !== undefined) {
+    properties.splice(2, 0, objectProperty("parentId", stringExpression(keyed.parentId)));
+  }
+  return factory.createObjectLiteralExpression(properties, true);
+}
+
 function makeViewExpression(
   context: PlanBuilderContext,
   templateId: string,
 ): ts.ObjectLiteralExpression {
   const hasComponents = context.components.length > 0;
   const hasConditions = context.conditions.length > 0;
+  const hasKeyedLists = context.keyedLists.length > 0;
   const plan = makePlanExpression(context);
   const instantiate = factory.createArrowFunction(
     undefined,
@@ -941,7 +1049,7 @@ function makeViewExpression(
   );
   return factory.createObjectLiteralExpression([
     objectProperty("protocol", stringExpression("ruseact.template")),
-    objectProperty("version", factory.createNumericLiteral(hasConditions ? 3 : hasComponents ? 2 : 1)),
+    objectProperty("version", factory.createNumericLiteral(hasKeyedLists ? 4 : hasConditions ? 3 : hasComponents ? 2 : 1)),
     objectProperty("templateId", stringExpression(templateId)),
     objectProperty("instantiate", instantiate),
   ], true);

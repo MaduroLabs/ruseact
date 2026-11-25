@@ -1034,3 +1034,29 @@ The focused real-browser command is
 `corepack pnpm test:browser:conditional`. Keyed lists, automatic tracking,
 scheduling, recursive draining, and arbitrary public anchor manipulation
 remain deferred.
+
+## M4.4.4 keyed-list implementation note
+
+The approved keyed-list subset is implemented through the existing renderer
+pipeline as protocol version 4. List data remains in JavaScript and one
+explicit scalar revision signal invalidates the shared structural computation.
+Keys are string/boolean/finite-number metadata with SameValueZero `Map`
+semantics. The renderer snapshots and validates the full collection before
+mutation, rejects duplicates and schema changes, retains item owners and
+field signal handles, and moves verified item ranges right-to-left. It does
+not add unkeyed lists, array/object Rust signals, a second queue, automatic
+tracking, or a scheduler.
+
+Private list and item comment anchors extend the existing host ownership
+boundary. Renderer-managed removals explicitly retire their host records;
+external detachments remain tombstones and fail closed. Item cleanup disposes
+descendants and dependent computations before renderer-owned field signals,
+then removes verified DOM resources. The browser fixture records actual
+Chromium focus behavior during native range movement rather than restoring
+focus manually.
+
+The provisional compiler marker is
+`ruseact.keyed([revision], collectionEvaluator, itemFactory)`. It emits
+version 4 only for keyed plans and preserves versions 1–3. See
+[docs/m4.4.4-keyed-lists.md](m4.4.4-keyed-lists.md) for the complete contract,
+failure boundaries, benchmark workloads, and M4.5 handoff.

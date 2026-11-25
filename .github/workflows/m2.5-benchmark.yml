@@ -76,3 +76,26 @@ jobs:
           path: target/m2.5-results
           if-no-files-found: warn
           retention-days: 14
+      - name: Run M4.4.4 keyed-list benchmark
+        env:
+          RUSEACT_BROWSER_BINDGEN_OUT: ${{ github.workspace }}/target/m2.5-browser-bindgen
+          RUSEACT_BENCHMARK_SOURCE_SHA: ${{ github.sha }}
+          RUSEACT_PNPM_VERSION: 12.16.1
+          RUSEACT_RUST_VERSION: 1.99.0
+          RUSEACT_TYPESCRIPT_VERSION: 5.9.3
+          RUSEACT_WASM_BINDGEN_VERSION: 0.2.130
+          RUSEACT_KEYED_BENCHMARK_OUT: ${{ github.workspace }}/target/m4.4.4-results/keyed-results.json
+          RUSEACT_KEYED_BENCHMARK_SUMMARY_OUT: ${{ github.workspace }}/target/m4.4.4-results/keyed-summary.md
+        run: |
+          mkdir -p target/m4.4.4-results
+          corepack pnpm benchmark:browser:keyed
+      - name: Validate M4.4.4 keyed-list benchmark
+        run: corepack pnpm benchmark:keyed:validate target/m4.4.4-results/keyed-results.json
+      - name: Upload M4.4.4 keyed-list benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruseact-m4.4.4-keyed-benchmark-${{ github.sha }}
+          path: target/m4.4.4-results
+          if-no-files-found: warn
+          retention-days: 14

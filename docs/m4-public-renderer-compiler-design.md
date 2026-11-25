@@ -1070,3 +1070,15 @@ implicit dependencies produce source-located compile diagnostics. The real
 browser fixture compiles Hello World and a Counter and runs the generated
 modules through M4.2 and Rust/WASM; component and structural semantics remain
 the M4.4 handoff.
+
+## M4.4.4 compatibility note
+
+The later approved M4.4.4 subset adds protocol version 4 for keyed-only list
+regions. It is implemented by the existing renderer rather than the generic
+structural IR proposed earlier in this document. The version-4 capability uses
+one explicit JavaScript collection revision signal, SameValueZero keys,
+pre-mutation snapshot validation, private item/list anchors, retained
+item-owned scalar signals, and deterministic native range movement. Unkeyed
+lists, implicit dependency inference, and generic mutable-tree reconciliation
+remain unsupported. The authoritative detail is in
+[docs/m4.4.4-keyed-lists.md](m4.4.4-keyed-lists.md).

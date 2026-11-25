@@ -903,3 +903,42 @@ make arbitrary JSX ternaries reactive or infer dependencies. The authoritative
 browser command is `corepack pnpm test:browser:conditional`; hosted Chromium
 must verify the real Rust/WASM-to-DOM path before this feature is considered
 complete. Keyed-list identity and equality remain the M4.4.4 handoff.
+
+## Decision 31: M4.4.4 implements approved keyed-only list regions
+
+M4.4.4 adds `ruseact.template` protocol version 4 while preserving versions 1,
+2, and 3. Version 4 uses the existing root, host, ownership, binding, and
+structural dispatch pipeline; it is not a second renderer or a mutable view
+tree. A version-4 plan adds a keyed-list region with one explicit scalar
+revision dependency, a JavaScript collection evaluator, and a lazy item
+factory.
+
+Structural keys are only strings, booleans, and finite numbers. A native
+`Map` supplies SameValueZero identity, so signed zero is one key while numeric,
+string, and boolean representations remain distinct. The complete collection
+snapshot is validated before mutation: missing/invalid/duplicate keys,
+invalid scalar fields, and retained schema changes preserve the previously
+published list. Unkeyed lists and implicit key inference remain rejected.
+
+Each list and item owns private comment anchors and an owner-local DOM range.
+Retained item owners, components, listeners, computations, DOM nodes, and
+renderer-owned scalar field signal handles are preserved. Changed retained
+fields use the existing scalar `set` operation; they do not mutate immutable
+props or rerun component setup. Desired order is reconciled deterministically
+right-to-left with verified native insertion moves. No LIS optimization or
+manual focus restoration is promised; Chromium records the observed native
+focus/selection behavior.
+
+List structural records share the existing `BindingContext` and Rust pending
+queue with scalar and conditional records. FIFO snapshot dispatch, exact
+same-snapshot disposal provenance, deferred generated work, and fail-closed
+unknown-computation handling are unchanged. Item cleanup is child-first,
+disposes dependent computations before owned field signals, releases completed
+records, and never disposes borrowed application signals or the runtime.
+
+The private compiler marker `ruseact.keyed([revision], evaluator, factory)` is
+provisional. It emits version 4 only when keyed metadata is present and
+preserves lexical closures and lazy factory execution. See
+[docs/m4.4.4-keyed-lists.md](m4.4.4-keyed-lists.md). M4.5 consumer integration,
+unkeyed behavior, hooks, scheduling, VDOM, and new Rust/WASM ABI remain
+deferred.

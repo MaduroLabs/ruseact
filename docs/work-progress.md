@@ -2,11 +2,11 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.4.1-structural-contract`
+- Branch: `feature/m4.4.3-conditional-regions`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `10c36cb52e62163ab0ad60ac4fa6b6fbf844d888`
+- Baseline: `origin/develop` at `7118157a76239a3573708e8065851f34de82362f`
 - Last verified on: Linux x86_64, 2026-11-25 for M4.4.1 component and
-  structural rendering contract design;
+  conditional structural regions implementation;
   M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
   integrity passed before this implementation branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
@@ -213,11 +213,26 @@
   implementation through PR #48 into `develop` and PR #49 into `main`.
 - [x] Complete the M4.3 compiler implementation through PR #50 into `develop`
   and promotion PR #51 into `main`; hosted Chromium verification passed.
-- [ ] Obtain human architecture approval for the M4.4.1 component and
-  structural contract before starting M4.4.2.
+- [x] Obtain approval for the M4.4.1 component/structural contract and the
+  M4.4.2 component subset; M4.4.3 conditional decisions are now approved.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
 - [ ] Add consumer verification in `ruseact-examples` after package output exists.
+
+- [x] Implement M4.4.3 private comment anchors, version-3 conditional plans,
+  explicit boolean selector dependencies, cleanup-first branch replacement,
+  child-first branch ownership, and shared scalar/structural dispatch.
+- [x] Add exact same-snapshot disposal handling: only renderer-authorized,
+  successfully disposed records from the validated snapshot are skipped and
+  counted in `FlushReport.skippedCount`; unknown records remain fail-closed.
+- [x] Extend the private compiler marker with lazy conditional branch factories
+  and deterministic version-3 region metadata while retaining version-1 and
+  version-2 output for unaffected templates.
+- [x] Add the real-WASM Chromium conditional harness covering anchor safety,
+  branch switching, empty/multi-node branches, nested components, rollback,
+  external DOM interference, deferred generated work, and resource bounds.
+- [ ] Complete hosted CI verification for M4.4.3 and leave the PR open for
+  human review; keyed lists remain deferred to M4.4.4.
 
 ## Commands verified
 
@@ -378,6 +393,13 @@
   passed 76 M4.3/M4.4.2 checks after the normal sandbox was blocked by
   `listen EPERM` on the temporary loopback server. Hosted Chromium remains
   authoritative for the pull request.
+- M4.4.3 local validation — PASS for TypeScript typecheck, compiler tests,
+  browser harness syntax, release WASM build, matching
+  `wasm-bindgen-cli 0.2.130` generation, and the escalated real Chromium
+  conditional harness (103 checks). Existing public renderer, compiler,
+  bindings, and root browser suites also passed locally (110, 76, 128, and
+  157 checks respectively). Normal InstaBox loopback execution remains
+  blocked by `listen EPERM`; hosted Chromium is authoritative.
 
 ## Blockers / decisions
 

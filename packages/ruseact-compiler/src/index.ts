@@ -24,7 +24,7 @@ export interface CompilerNodeMetadata {
 
 export interface CompilerSlotMetadata {
   readonly id: string;
-  readonly kind: "text" | "attribute" | "property" | "listener" | "component";
+  readonly kind: "text" | "attribute" | "property" | "listener" | "component" | "conditional";
   readonly location: CompilerSourceLocation;
 }
 
@@ -79,6 +79,22 @@ interface ComponentPlan {
   readonly props: readonly { readonly name: string; readonly value: ts.Expression }[];
 }
 
+interface BranchPlan {
+  readonly context?: PlanBuilderContext;
+  readonly sourceNode: ts.Node;
+}
+
+interface ConditionalPlan {
+  readonly id: string;
+  readonly parentId?: string;
+  readonly order: number;
+  readonly sourceNode: ts.Node;
+  readonly dependencies: readonly ts.Expression[];
+  readonly evaluator: ts.ArrowFunction | ts.FunctionExpression;
+  readonly whenTrue: BranchPlan;
+  readonly whenFalse: BranchPlan;
+}
+
 interface BindingPlan {
   readonly kind: BindingKind;
   readonly slot: string;
@@ -112,18 +128,43 @@ interface PlanBuilderContext {
   readonly bindings: BindingPlan[];
   readonly listeners: ListenerPlan[];
   readonly components: ComponentPlan[];
+  readonly conditions: ConditionalPlan[];
   readonly nodeMetadata: CompilerNodeMetadata[];
   readonly slotMetadata: CompilerSlotMetadata[];
   nextNode: number;
   nextBinding: number;
   nextListener: number;
   nextComponent: number;
+  nextRegion: number;
   readonly nextOrderByParent: Map<string, number>;
 }
 
 const factory = ts.factory;
 const compilerMarkerObject = "ruseact";
 const supportedProperties = new Set<SupportedProperty>(["value", "checked", "disabled"]);
+
+function createPlanBuilderContext(
+  sourceFile: ts.SourceFile,
+  diagnostics: CompilerDiagnostic[],
+): PlanBuilderContext {
+  return {
+    sourceFile,
+    diagnostics,
+    nodes: [],
+    bindings: [],
+    listeners: [],
+    components: [],
+    conditions: [],
+    nodeMetadata: [],
+    slotMetadata: [],
+    nextNode: 0,
+    nextBinding: 0,
+    nextListener: 0,
+    nextComponent: 0,
+    nextRegion: 0,
+    nextOrderByParent: new Map(),
+  };
+}
 
 function flattenMessage(message: string | ts.DiagnosticMessageChain): string {
   if (typeof message === "string") {
@@ -268,6 +309,85 @@ function parseBindingMarker(
     return undefined;
   }
   return { kind, dependencies, evaluator };
+}
+
+function branchExpression(
+  context: PlanBuilderContext,
+  factoryExpression: ts.Expression,
+): { readonly expression?: ts.Expression; readonly sourceNode: ts.Node } | undefined {
+  if (!ts.isArrowFunction(factoryExpression) && !ts.isFunctionExpression(factoryExpression)) {
+    report(context, factoryExpression, "invalid_branch_factory", "conditional branches must be arrow or function factories");
+    return undefined;
+  }
+  if (!ts.isBlock(factoryExpression.body)) {
+    return { expression: factoryExpression.body, sourceNode: factoryExpression };
+  }
+  if (factoryExpression.body.statements.length !== 1 || !ts.isReturnStatement(factoryExpression.body.statements[0])) {
+    report(context, factoryExpression, "invalid_branch_factory", "conditional branch factories must return one supported JSX view or null");
+    return undefined;
+  }
+  return { expression: factoryExpression.body.statements[0].expression, sourceNode: factoryExpression };
+}
+
+function parseBranchPlan(context: PlanBuilderContext, factoryExpression: ts.Expression): BranchPlan | undefined {
+  const extracted = branchExpression(context, factoryExpression);
+  if (extracted === undefined) return undefined;
+  if (extracted.expression === undefined || extracted.expression.kind === ts.SyntaxKind.NullKeyword) {
+    return { sourceNode: extracted.sourceNode };
+  }
+  if (!ts.isJsxElement(extracted.expression) && !ts.isJsxSelfClosingElement(extracted.expression)) {
+    report(context, extracted.expression, "invalid_branch_factory", "conditional branch factories must return JSX or null");
+    return undefined;
+  }
+  const branch = createPlanBuilderContext(context.sourceFile, context.diagnostics);
+  parseJsxNode(branch, extracted.expression, undefined);
+  return { context: branch, sourceNode: extracted.sourceNode };
+}
+
+function parseConditionalMarker(
+  context: PlanBuilderContext,
+  node: ts.Expression,
+  parentId: string | undefined,
+): boolean {
+  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) {
+    return false;
+  }
+  const receiver = node.expression.expression;
+  if (!ts.isIdentifier(receiver) || receiver.text !== compilerMarkerObject || node.expression.name.text !== "conditional") {
+    return false;
+  }
+  if (node.arguments.length !== 4 || !ts.isArrayLiteralExpression(node.arguments[0])) {
+    report(context, node, "invalid_conditional_marker", "ruseact.conditional requires one dependency array, evaluator, and two branch factories");
+    return true;
+  }
+  const dependencies = node.arguments[0].elements;
+  if (dependencies.length !== 1 || dependencies.some((dependency) => !ts.isExpression(dependency) || !isSimpleDependency(dependency))) {
+    report(context, node.arguments[0], "invalid_conditional_dependency", "conditional regions require exactly one explicit signal reference");
+    return true;
+  }
+  const evaluator = node.arguments[1];
+  if (!ts.isArrowFunction(evaluator) && !ts.isFunctionExpression(evaluator)) {
+    report(context, evaluator, "invalid_selector_evaluator", "conditional selector must be an arrow or function evaluator");
+    return true;
+  }
+  const whenTrue = parseBranchPlan(context, node.arguments[2]);
+  const whenFalse = parseBranchPlan(context, node.arguments[3]);
+  if (whenTrue === undefined || whenFalse === undefined) return true;
+  const id = `r${context.nextRegion}`;
+  context.nextRegion += 1;
+  const condition: ConditionalPlan = {
+    id,
+    ...(parentId === undefined ? {} : { parentId }),
+    order: nextOrder(context, parentId),
+    sourceNode: node,
+    dependencies,
+    evaluator,
+    whenTrue,
+    whenFalse,
+  };
+  context.conditions.push(condition);
+  addSlotMetadata(context, id, "conditional", node);
+  return true;
 }
 
 function addNodeMetadata(context: PlanBuilderContext, node: NodePlan): void {
@@ -484,6 +604,9 @@ function parseChild(context: PlanBuilderContext, child: ts.JsxChild, parentId: s
     }
     if (ts.isNumericLiteral(expression)) {
       addTextNode(context, parentId, expression.text, expression);
+      return;
+    }
+    if (parseConditionalMarker(context, expression, parentId)) {
       return;
     }
     const marker = parseBindingMarker(context, expression, "text");
@@ -743,17 +866,71 @@ function makeListenerExpression(listener: ListenerPlan): ts.ObjectLiteralExpress
   return factory.createObjectLiteralExpression(properties, true);
 }
 
+function makePlanExpression(context: PlanBuilderContext): ts.ObjectLiteralExpression {
+  const hasComponents = context.components.length > 0;
+  const hasConditions = context.conditions.length > 0;
+  return factory.createObjectLiteralExpression([
+    objectProperty("nodes", factory.createArrayLiteralExpression(context.nodes.map((node) => makeStaticNodeExpression(node, hasComponents || hasConditions)), true)),
+    objectProperty("bindings", factory.createArrayLiteralExpression(context.bindings.map(makeBindingExpression), true)),
+    objectProperty("listeners", factory.createArrayLiteralExpression(context.listeners.map(makeListenerExpression), true)),
+    ...(hasComponents || hasConditions ? [objectProperty("components", factory.createArrayLiteralExpression(context.components.map(makeComponentExpression), true))] : []),
+    ...(hasConditions ? [objectProperty("conditions", factory.createArrayLiteralExpression(context.conditions.map(makeConditionalExpression), true))] : []),
+  ], true);
+}
+
+function makeEmptyPlanExpression(): ts.ObjectLiteralExpression {
+  return factory.createObjectLiteralExpression([
+    objectProperty("nodes", factory.createArrayLiteralExpression([], false)),
+    objectProperty("bindings", factory.createArrayLiteralExpression([], false)),
+    objectProperty("listeners", factory.createArrayLiteralExpression([], false)),
+  ], true);
+}
+
+function makeBranchFactory(branch: BranchPlan): ts.ArrowFunction {
+  const environmentParameter = factory.createParameterDeclaration(
+    undefined,
+    undefined,
+    "environment",
+    undefined,
+    undefined,
+    undefined,
+  );
+  return factory.createArrowFunction(
+    undefined,
+    undefined,
+    [environmentParameter],
+    undefined,
+    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+    factory.createParenthesizedExpression(factory.createObjectLiteralExpression([
+      objectProperty("ok", factory.createTrue()),
+      objectProperty("value", branch.context === undefined ? makeEmptyPlanExpression() : makePlanExpression(branch.context)),
+    ], true)),
+  );
+}
+
+function makeConditionalExpression(condition: ConditionalPlan): ts.ObjectLiteralExpression {
+  const properties: ts.ObjectLiteralElementLike[] = [
+    objectProperty("kind", stringExpression("conditional")),
+    objectProperty("id", stringExpression(condition.id)),
+    objectProperty("order", factory.createNumericLiteral(condition.order)),
+    objectProperty("dependencies", arrayExpression(condition.dependencies)),
+    objectProperty("evaluate", condition.evaluator),
+    objectProperty("whenTrue", makeBranchFactory(condition.whenTrue)),
+    objectProperty("whenFalse", makeBranchFactory(condition.whenFalse)),
+  ];
+  if (condition.parentId !== undefined) {
+    properties.splice(2, 0, objectProperty("parentId", stringExpression(condition.parentId)));
+  }
+  return factory.createObjectLiteralExpression(properties, true);
+}
+
 function makeViewExpression(
   context: PlanBuilderContext,
   templateId: string,
 ): ts.ObjectLiteralExpression {
   const hasComponents = context.components.length > 0;
-  const plan = factory.createObjectLiteralExpression([
-    objectProperty("nodes", factory.createArrayLiteralExpression(context.nodes.map((node) => makeStaticNodeExpression(node, hasComponents)), true)),
-    objectProperty("bindings", factory.createArrayLiteralExpression(context.bindings.map(makeBindingExpression), true)),
-    objectProperty("listeners", factory.createArrayLiteralExpression(context.listeners.map(makeListenerExpression), true)),
-    ...(hasComponents ? [objectProperty("components", factory.createArrayLiteralExpression(context.components.map(makeComponentExpression), true))] : []),
-  ], true);
+  const hasConditions = context.conditions.length > 0;
+  const plan = makePlanExpression(context);
   const instantiate = factory.createArrowFunction(
     undefined,
     undefined,
@@ -764,7 +941,7 @@ function makeViewExpression(
   );
   return factory.createObjectLiteralExpression([
     objectProperty("protocol", stringExpression("ruseact.template")),
-    objectProperty("version", factory.createNumericLiteral(hasComponents ? 2 : 1)),
+    objectProperty("version", factory.createNumericLiteral(hasConditions ? 3 : hasComponents ? 2 : 1)),
     objectProperty("templateId", stringExpression(templateId)),
     objectProperty("instantiate", instantiate),
   ], true);
@@ -823,40 +1000,12 @@ export function compileTsxModule(source: string, options: CompileOptions = {}): 
     const visit = (node: ts.Node): ts.VisitResult<ts.Node> => {
       if (!ts.isJsxElement(node) && !ts.isJsxSelfClosingElement(node)) {
         if (ts.isJsxFragment(node)) {
-          const planContext: PlanBuilderContext = {
-            sourceFile,
-            diagnostics,
-            nodes: [],
-            bindings: [],
-            listeners: [],
-            components: [],
-            nodeMetadata: [],
-            slotMetadata: [],
-            nextNode: 0,
-            nextBinding: 0,
-            nextListener: 0,
-            nextComponent: 0,
-            nextOrderByParent: new Map(),
-          };
+          const planContext = createPlanBuilderContext(sourceFile, diagnostics);
           report(planContext, node, "unsupported_fragment", "JSX fragments are not supported in the static M4.3 subset");
         }
         return ts.visitEachChild(node, visit, context);
       }
-      const planContext: PlanBuilderContext = {
-        sourceFile,
-        diagnostics,
-        nodes: [],
-        bindings: [],
-        listeners: [],
-        components: [],
-        nodeMetadata: [],
-        slotMetadata: [],
-        nextNode: 0,
-        nextBinding: 0,
-        nextListener: 0,
-        nextComponent: 0,
-        nextOrderByParent: new Map(),
-      };
+      const planContext = createPlanBuilderContext(sourceFile, diagnostics);
       parseJsxNode(planContext, node, undefined);
       const templateSource = source.slice(node.getStart(sourceFile), node.getEnd());
       const templateId = `m4.3-${hashTemplate(`${fileName}\0${templateSource}`)}`;
@@ -888,21 +1037,7 @@ export function compileTsxModule(source: string, options: CompileOptions = {}): 
     return { ok: false, diagnostics: emittedDiagnostics };
   }
 
-  const metadataContext: PlanBuilderContext = {
-    sourceFile,
-    diagnostics: [],
-    nodes: [],
-    bindings: [],
-    listeners: [],
-    components: [],
-    nodeMetadata: [],
-    slotMetadata: [],
-    nextNode: 0,
-    nextBinding: 0,
-    nextListener: 0,
-    nextComponent: 0,
-    nextOrderByParent: new Map(),
-  };
+  const metadataContext = createPlanBuilderContext(sourceFile, []);
   const firstJsx = (() => {
     let result: ts.JsxElement | ts.JsxSelfClosingElement | undefined;
     const visitor = (node: ts.Node): void => {

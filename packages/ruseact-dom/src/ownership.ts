@@ -13,6 +13,7 @@ export interface ComponentOwner {
   readonly parent?: ComponentOwner;
   readonly state: OwnerLifecycleState;
   createChild(localIdentity: string): CoreResult<ComponentOwner>;
+  releaseChild(child: ComponentOwner): CoreResult<void>;
   trackBinding(binding: BindingHandle, dispose: () => CoreResult<void>): CoreResult<void>;
   trackResource(cleanup: () => CoreResult<unknown> | void): CoreResult<void>;
   publish(): CoreResult<void>;
@@ -123,6 +124,19 @@ function createOwner(
     return success(undefined);
   }
 
+  function releaseChild(child: ComponentOwner): CoreResult<void> {
+    const unavailable = activeForRegistration("release_component_owner");
+    if (unavailable !== undefined) {
+      return unavailable;
+    }
+    const index = children.indexOf(child);
+    if (index < 0 || child.parent !== api || child.state !== "disposed") {
+      return failure(ownerError("foreign_owner", "release_component_owner", `owner ${id} cannot release the supplied child`));
+    }
+    children.splice(index, 1);
+    return success(undefined);
+  }
+
   function trackBinding(binding: BindingHandle, dispose: () => CoreResult<void>): CoreResult<void> {
     if (binding === undefined || typeof dispose !== "function") {
       return failure(ownerError("invalid_component_instance", "track_binding", "binding ownership is malformed"));
@@ -201,6 +215,7 @@ function createOwner(
       return state;
     },
     createChild,
+    releaseChild,
     trackBinding,
     trackResource,
     publish,

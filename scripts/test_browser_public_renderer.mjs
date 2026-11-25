@@ -388,7 +388,7 @@ function browserPage() {
         value(runtime.get(count), "borrowed signal survives root disposal");
 
         const invalidPlans = [
-          ["unsupported_view_version", { ...staticView, version: 3 }],
+          ["unsupported_view_version", { ...staticView, version: 4 }],
           ["duplicate_node_id", { ...staticView, instantiate: () => ({ nodes: [
             { id: "same", kind: "element", name: "div" },
             { id: "same", kind: "text", text: "bad" },

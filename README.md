@@ -27,7 +27,8 @@ Ruseact explores a different separation of responsibilities:
   M3.4 root lifecycle, the approved M4.2 public renderer MVP, the narrow M4.3
   JSX/TSX compiler MVP, the approved M4.4.2 one-shot component subset, the
   approved M4.4.3 conditional-region subset, and the M4.4.4 keyed-list
-  implementation are present; keyed-list promotion remains subject to review.
+  implementation are present. M4.5.1 adds an installable experimental
+  tarball pipeline without publishing packages.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -59,7 +60,8 @@ API compatibility is claimed.
 | M4.4.1 — Component and structural rendering contract | Complete; conditional and keyed contracts remain deferred |
 | M4.4.2 — Function components and nested ownership | Complete; hosted Chromium verification passed |
 | M4.4.3 — Conditional structural regions | Complete; hosted Chromium verification passed |
-| M4.4.4 — Keyed lists and stable DOM identity | Implemented on the reviewed feature branch; hosted Chromium and benchmark verification required |
+| M4.4.4 — Keyed lists and stable DOM identity | Complete; hosted Chromium and benchmark verification passed |
+| M4.5.1 — Experimental package distribution | Tarball pipeline and isolated consumer verification implemented; PR review pending |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
@@ -196,7 +198,8 @@ execution, automatic dependency tracking, scheduling, or a public DOM API.
 - `packages/ruseact` — TypeScript runtime bridge and shared scalar/handle
   types.
 - `packages/ruseact-compiler` — private TypeScript Compiler API transform for
-  the supported M4.3–M4.4.4 TSX subset; it is not a published package.
+  the supported M4.3–M4.4.4 TSX subset; M4.5.1 can pack it as a build-time
+  tarball, but it is not published.
 - `packages/ruseact-dom` — Browser host adapter, explicit bindings, internal
   root lifecycle, the M4.2 public renderer façade, and the M4.4.4 keyed-list
   structural path.
@@ -456,6 +459,48 @@ external DOM interference, and generated version-3 modules. Hosted Chromium is
 authoritative when InstaBox cannot bind its temporary loopback server.
 The focused contract is documented in
 [docs/m4.4.3-conditional-regions.md](docs/m4.4.3-conditional-regions.md).
+
+## M4.5.1 experimental package distribution
+
+M4.5.1 produces matching private tarballs for the existing three package
+boundaries at version `0.1.0-alpha.0`. The artifacts are ESM packages with
+declarations and source maps; `ruseact` also contains the release WASM binary
+and matching Node/web `wasm-bindgen` loaders. No npm publication, tag, or
+GitHub Release is performed.
+
+Build and verify the local artifact set with:
+
+```bash
+corepack pnpm install --frozen-lockfile
+corepack pnpm build:distribution
+corepack pnpm pack:packages
+corepack pnpm validate:distribution
+corepack pnpm test:packages
+```
+
+The tarballs and `target/distribution/distribution-manifest.json` are ignored
+outputs. The manifest records the source revision, dirty-tree limitation,
+package sizes, SHA-256 checksums, toolchains, WASM targets, and supported
+template protocols. The test command installs those tarballs in a temporary
+consumer outside the workspace, typechecks installed declarations, initializes
+the real WASM runtime, compiles supported TSX, and runs the installed packages
+through Node and Chromium. It also verifies a runtime-only consumer without
+the compiler package.
+
+Browser consumers initialize the packaged web WASM explicitly:
+
+```ts
+import initializeWasm, * as wasm from "ruseact/wasm/web";
+import { createReactiveCore } from "ruseact";
+
+await initializeWasm();
+const result = await createReactiveCore(() => wasm);
+if (!result.ok) throw new Error(result.error.code);
+```
+
+The supported package entry points, Node loading path, artifact manifest, and
+isolation rules are documented in
+[docs/m4.5-package-distribution.md](docs/m4.5-package-distribution.md).
 
 ## Development
 

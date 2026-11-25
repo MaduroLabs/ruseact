@@ -1,10 +1,10 @@
-import type { ComputationHandle, SignalHandle } from "../../ruseact/src/handles.js";
+import type { ComputationHandle, SignalHandle } from "ruseact";
 import type {
   CoreError,
   CoreResult,
   ReactiveCore,
   SupportedScalar,
-} from "../../ruseact/src/types.js";
+} from "ruseact";
 import type { HostContext } from "./host.js";
 
 export type BindingErrorCode =

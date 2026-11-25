@@ -172,12 +172,16 @@ importers:
 
   packages/ruseact: {}
 
-  packages/ruseact-compiler: {}
+  packages/ruseact-compiler:
+    dependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   packages/ruseact-dom:
     dependencies:
       ruseact:
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../ruseact
 
 packages:

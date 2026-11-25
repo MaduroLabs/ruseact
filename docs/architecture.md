@@ -789,3 +789,34 @@ M4.3 does not add automatic tracking, scheduling, component execution,
 structural reconciliation, a WASM ABI change, or a public compiler API. M4.4
 must separately approve any component, conditional-region, keyed-list, or
 dynamic-dependency contract.
+
+## Decision 28: M4.4.1 defines a proposed component and structural contract
+
+M4.4.1 is documentation-only. It audits the implemented M4.2 public static
+renderer and M4.3 compiler and proposes a conservative path for future
+components, conditional regions, and keyed lists. It does not add component
+execution, structural DOM operations, compiler transforms, public exports,
+Rust/WASM changes, or a scheduler.
+
+The recommended direction is one-shot JavaScript component setup with
+hierarchical owner scopes, followed by explicit anchored conditional regions
+and keyed-only lists. A component identity is scoped by its parent region,
+component type, and explicit local slot or key; it is never a DOM position or a
+Rust `ComputationHandle`. Components borrow the runtime and application
+signals while owning their descendants, bindings, computations, listeners,
+and created DOM resources. Cleanup is child-first and fail-closed.
+
+The current host supports Element and Text nodes but no dedicated invisible
+anchor. Conditional regions therefore require an approved host extension,
+preferably renderer-owned comment anchors with the same document, context,
+ancestry, and cleanup validation. Structural computations should reuse
+legitimate Rust computation identities and the existing FIFO, deduplicated,
+one-snapshot manual flush; they must not create a second queue or scheduler.
+
+The proposed keyed-list contract is keyed-only with pre-mutation duplicate
+validation, `SameValueZero` equality, stable retained item owners, native DOM
+moves, and disposal only for removed keys. The recommendation is not an
+approved public API. The anchor node kind, component identity, props update
+semantics, structural protocol version, key policy, and recovery behavior
+require human approval before M4.4.2–M4.4.4 implementation. See
+[docs/m4.4-component-structural-design.md](m4.4-component-structural-design.md).

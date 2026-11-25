@@ -142,6 +142,9 @@ function browserPage() {
       function success(value) {
         return { ok: true, value };
       }
+      function failure(code, operation, resource, message) {
+        return { ok: false, error: { kind: "internal", code, operation, resource, message } };
+      }
 
       try {
         window.__ruseactStage = "importing-modules";
@@ -211,6 +214,155 @@ function browserPage() {
         check(counterContainer.contains(unrelated), "compiled unrelated DOM preservation");
         value(counterRoot.dispose(), "compiled counter dispose", counterRoot);
         check(value(runtime.get(count), "borrowed signal survives compiled cleanup") === countBeforeUnmount, "borrowed runtime survives compiled cleanup");
+
+        let headingSetups = 0;
+        let panelSetups = 0;
+        let counterSetups = 0;
+        const Heading = domModule.defineComponent("Heading", (props) => {
+          headingSetups += 1;
+          const label = typeof props.label === "string" ? props.label : "";
+          return success({
+            protocol: "ruseact.template",
+            version: 1,
+            templateId: "browser-heading",
+            instantiate: () => ({
+              nodes: [{ id: "heading", kind: "element", name: "h2" }, { id: "heading-text", kind: "text", parentId: "heading", text: label }],
+              bindings: [],
+              listeners: [],
+            }),
+          });
+        });
+        const Panel = domModule.defineComponent("Panel", () => {
+          panelSetups += 1;
+          return success({
+            nodes: [{ id: "panel", kind: "element", name: "div" }],
+            bindings: [],
+            listeners: [],
+            components: [{ kind: "component", id: "heading-slot", order: 0, component: Heading, props: { label: "Compiled component" } }],
+          });
+        });
+        const Counter = domModule.defineComponent("Counter", (props, { runtime: componentRuntime }) => {
+          counterSetups += 1;
+          const componentCount = props.count;
+          return success({
+            protocol: "ruseact.template",
+            version: 1,
+            templateId: "browser-counter",
+            instantiate: () => ({
+              nodes: [
+                { id: "counter", kind: "element", name: "div", attributes: [{ name: "class", value: "component-counter" }] },
+                { id: "value", kind: "text", parentId: "counter", text: "" },
+                { id: "button", kind: "element", parentId: "counter", name: "button" },
+                { id: "button-text", kind: "text", parentId: "button", text: "Increment" },
+              ],
+              bindings: [{
+                kind: "text",
+                slot: "count",
+                targetId: "value",
+                dependencies: [componentCount],
+                evaluate: ({ runtime: currentRuntime }) => {
+                  const current = currentRuntime.get(componentCount);
+                  return current.ok ? success(String(current.value)) : current;
+                },
+              }],
+              listeners: [{
+                id: "increment",
+                targetId: "button",
+                type: "click",
+                listener: () => {
+                  const current = componentRuntime.get(componentCount);
+                  if (current.ok) componentRuntime.set(componentCount, current.value + 1);
+                },
+              }],
+            }),
+          });
+        });
+        const componentCountA = value(runtime.createSignal(10), "component signal A");
+        const componentCountB = value(runtime.createSignal(20), "component signal B");
+        const componentContainer = document.createElement("main");
+        document.body.appendChild(componentContainer);
+        const componentRoot = value(domModule.createRoot(componentContainer, runtime), "compiled component root creation");
+        const componentView = compiled.createComponentView({ Panel, Counter, countA: componentCountA, countB: componentCountB });
+        value(componentRoot.mount(componentView), "compiled component mount", componentRoot);
+        check(headingSetups === 1 && panelSetups === 1 && counterSetups === 2, "component setup executes once per instance");
+        const componentButtons = componentContainer.querySelectorAll("button");
+        const componentValues = componentContainer.querySelectorAll("div.component-counter");
+        check(componentContainer.querySelector("h2")?.textContent === "Compiled component", "compiled component static output");
+        check(componentValues[0]?.textContent === "10Increment" && componentValues[1]?.textContent === "20Increment", "independent component initial values");
+        const firstComponentText = componentValues[0]?.firstChild;
+        const secondComponentText = componentValues[1]?.firstChild;
+        componentButtons[0]?.dispatchEvent(new Event("click"));
+        check(value(runtime.get(componentCountA), "component A event update") === 11, "component event updates signal");
+        check(componentValues[0]?.textContent === "10Increment", "component update waits for flush");
+        value(componentRoot.flush(), "compiled component flush", componentRoot);
+        check(componentValues[0]?.textContent === "11Increment" && componentValues[1]?.textContent === "20Increment", "component A updates independently");
+        check(componentValues[0]?.firstChild === firstComponentText && componentValues[1]?.firstChild === secondComponentText, "component DOM identity is stable");
+        componentButtons[1]?.dispatchEvent(new Event("click"));
+        componentButtons[1]?.dispatchEvent(new Event("click"));
+        value(componentRoot.flush(), "compiled component fanout flush", componentRoot);
+        check(componentValues[0]?.textContent === "11Increment" && componentValues[1]?.textContent === "22Increment", "component B updates independently");
+        check(headingSetups === 1 && panelSetups === 1 && counterSetups === 2, "signal updates do not rerun components");
+        const componentButton = componentButtons[0];
+        value(componentRoot.unmount(), "compiled component unmount", componentRoot);
+        componentButton?.dispatchEvent(new Event("click"));
+        check(value(runtime.get(componentCountA), "component listener cleanup") === 11, "component listeners are cleaned up");
+        value(componentRoot.dispose(), "compiled component dispose", componentRoot);
+        document.body.removeChild(componentContainer);
+
+        const Failing = domModule.defineComponent("Failing", () =>
+          failure("component_setup_failed", "setup", "component", "intentional nested setup failure"));
+        const failureContainer = document.createElement("main");
+        document.body.appendChild(failureContainer);
+        const failureRoot = value(domModule.createRoot(failureContainer, runtime), "nested failure root creation");
+        const failureView = {
+          protocol: "ruseact.template",
+          version: 2,
+          templateId: "nested-failure",
+          instantiate: () => ({
+            nodes: [{ id: "failure-parent", kind: "element", name: "section" }],
+            bindings: [],
+            listeners: [],
+            components: [
+              { kind: "component", id: "good", order: 0, parentId: "failure-parent", component: Counter, props: { count: componentCountA } },
+              { kind: "component", id: "bad", order: 1, parentId: "failure-parent", component: Failing },
+            ],
+          }),
+        };
+        expectError(failureRoot.mount(failureView), "child_mount_failed", "nested setup rollback", failureRoot);
+        check(failureRoot.state === "unmounted", "nested setup rollback state");
+        check(failureContainer.childNodes.length === 0, "nested setup rollback removes DOM");
+        check(value(runtime.get(componentCountA), "nested setup preserves signal") === 11, "nested setup preserves borrowed signal");
+        value(failureRoot.dispose(), "nested setup failure root dispose", failureRoot);
+        document.body.removeChild(failureContainer);
+
+        const invalidComponentPlans = [
+          ["duplicate_component_identity", {
+            nodes: [], bindings: [], listeners: [], components: [
+              { kind: "component", id: "same", order: 0, component: Heading },
+              { kind: "component", id: "same", order: 1, component: Heading },
+            ],
+          }],
+          ["invalid_component_props", {
+            nodes: [], bindings: [], listeners: [], components: [
+              { kind: "component", id: "bad-props", order: 0, component: Heading, props: { value: {} } },
+            ],
+          }],
+        ];
+        for (const [code, plan] of invalidComponentPlans) {
+          const invalidComponentContainer = document.createElement("main");
+          document.body.appendChild(invalidComponentContainer);
+          const invalidComponentRoot = value(domModule.createRoot(invalidComponentContainer, runtime), "invalid component root creation");
+          expectError(invalidComponentRoot.mount({
+            protocol: "ruseact.template",
+            version: 2,
+            templateId: "invalid-component-plan",
+            instantiate: () => plan,
+          }), code, "invalid component plan " + code, invalidComponentRoot);
+          check(invalidComponentRoot.state === "unmounted", "invalid component rollback state");
+          check(invalidComponentContainer.childNodes.length === 0, "invalid component rollback DOM");
+          value(invalidComponentRoot.dispose(), "invalid component root disposal", invalidComponentRoot);
+          document.body.removeChild(invalidComponentContainer);
+        }
         value(runtime.dispose(), "application runtime disposal");
         document.body.removeChild(counterContainer);
         window.__ruseactPublish({ ok: true, checks });
@@ -246,6 +398,16 @@ export function createCounterView({ count, disabled, runtime }) {
         const current = runtime.get(count);
         if (current.ok) runtime.set(count, current.value + 1);
       }}>Increment</button>
+    </section>
+  );
+}
+
+export function createComponentView({ Panel, Counter, countA, countB }) {
+  return (
+    <section class="component-tree">
+      <Panel />
+      <Counter count={countA} />
+      <Counter count={countB} />
     </section>
   );
 }`;
@@ -350,7 +512,7 @@ try {
   if (!testResult.ok) {
     throw new Error(`compiler browser tests failed after ${testResult.checks.length} checks: ${testResult.error}`);
   }
-  console.log(`${browser.version} M4.3 compiler browser tests passed ${testResult.checks.length} checks`);
+  console.log(`${browser.version} M4.3/M4.4.2 compiler and component browser tests passed ${testResult.checks.length} checks`);
 } finally {
   if (server !== undefined) await new Promise((resolve) => server.close(resolve));
   rmSync(temporaryRoot, { recursive: true, force: true });

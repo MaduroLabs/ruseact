@@ -24,9 +24,10 @@ Ruseact explores a different separation of responsibilities:
   scheduling.
 - **TypeScript/JavaScript:** Component execution and browser-facing integration.
 - **DOM adapter:** Native M3.2 host operations, M3.3 explicit bindings, the
-  M3.4 root lifecycle, the approved M4.2 public renderer MVP, and the narrow
-  M4.3 JSX/TSX compiler MVP are implemented; components and structural
-  rendering remain deferred.
+  M3.4 root lifecycle, the approved M4.2 public renderer MVP, the narrow M4.3
+  JSX/TSX compiler MVP, and the approved M4.4.2 one-shot component subset are
+  implemented; conditional regions and keyed structural rendering remain
+  deferred.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -55,11 +56,12 @@ API compatibility is claimed.
 | M4.1 — Public renderer and compiler contract design | Complete; M4.2 subset approved |
 | M4.2 — Public renderer MVP | Complete; hosted Chromium verification passed |
 | M4.3 — JSX/TSX compiler MVP | Complete; hosted Chromium verification passed |
-| M4.4.1 — Component and structural rendering contract | Design-only proposal; implementation decisions require approval |
+| M4.4.1 — Component and structural rendering contract | Complete; conditional and keyed contracts remain deferred |
+| M4.4.2 — Function components and nested ownership | Implemented on the reviewed feature branch; hosted Chromium verification required |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
-| Compiler integration       | M4.3 narrow TSX-to-ViewDescription transform implemented; components and structural syntax deferred |
+| Compiler integration       | M4.3 intrinsic TSX and M4.4.2 static component placement transforms implemented; structural syntax deferred |
 | Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
 
 ### Currently implemented
@@ -129,29 +131,30 @@ The Rust reactive core supports:
   one-shot mount semantics; and delegation to the existing M3.2–M3.4
   ownership, binding, and cleanup pipeline.
 
-- An internal M4.3 compiler module in `packages/ruseact-compiler` that parses
+- An internal M4.3/M4.4.2 compiler module in `packages/ruseact-compiler` that parses
   a deliberately limited TSX subset with the TypeScript Compiler API and emits
-  executable ESM compatible with `ViewDescription` version 1. It generates
-  deterministic static node and slot IDs, preserves JavaScript closures and
-  event handlers, requires explicit compiler-only dependency markers, and
-  reports source-located diagnostics for unsupported syntax. It does not infer
-  signals, add a JSX runtime, implement components, or perform structural
+  executable ESM compatible with `ViewDescription` versions 1 and 2. It
+  generates deterministic static node, component, and slot IDs, preserves
+  JavaScript closures and event handlers, requires explicit compiler-only
+  dependency markers, and reports source-located diagnostics for unsupported
+  syntax. Component setup is supplied separately through `defineComponent`;
+  the compiler does not add a component rerender engine or structural
   reconciliation.
 
-- An M4.4.1 design proposal for component identity, hierarchical resource
-  ownership, anchored conditional regions, keyed-only list identity, and their
-  compiler and flush boundaries. This is documentation only: components,
-  structural regions, keyed lists, anchor nodes, and new public contracts are
-  not implemented or exported.
+- An M4.4.1 design for component identity, hierarchical resource ownership,
+  anchored conditional regions, keyed-only list identity, and their compiler
+  and flush boundaries. M4.4.2 now implements only the approved one-shot
+  component and nested-owner subset; structural regions, keyed lists, anchors,
+  and component rerendering remain deferred.
 
 M4.1 defined the renderer/compiler contract and the project owner approved the
 narrow M4.2 subset. M4.2 implements the public root façade over the internal
 lifecycle, static mount plans, explicit binding slots, structured results, and
-manual flush. M4.3 now adds only the compiler transform needed to emit that
-existing version-1 plan; its explicit `ruseact.bindText`, `bindAttribute`, and
-`bindProperty` markers are provisional compiler input, not public runtime APIs.
-Component identity, structural regions, automatic dependency tracking, and
-scheduling remain deferred.
+manual flush. M4.3 emits the intrinsic version-1 plan with provisional
+`ruseact.bindText`, `bindAttribute`, and `bindProperty` compiler markers, not
+public runtime APIs. M4.4.2 adds only the approved static version-2 component
+placements and hierarchical ownership; structural regions, automatic
+dependency tracking, and scheduling remain deferred.
 
 The M4.4.1 proposal in
 [docs/m4.4-component-structural-design.md](docs/m4.4-component-structural-design.md)
@@ -400,12 +403,17 @@ not inferred to be reactive.
 
 The hosted browser command is `corepack pnpm test:browser:compiler`. It builds
 the real Rust/WASM bindings, executes generated modules in Chromium through
-the public renderer, and verifies compiled Hello World and Counter fixtures.
-The compiler currently rejects components, fragments, conditional structure,
-lists, spreads, unsupported namespaces, implicit dependencies, hooks, and
-React-specific syntax. See
-[docs/m4-jsx-compiler.md](docs/m4-jsx-compiler.md) for the generated module
-contract and M4.4 handoff.
+the public renderer, and verifies compiled Hello World, Counter, and static
+component/nested-owner fixtures. Uppercase statically named component
+references emit version-2 placement metadata; the application supplies
+`defineComponent` definitions and explicit props. Dynamic component tags,
+component children, fragments, conditional structure, lists, spreads,
+unsupported namespaces, implicit dependencies, hooks, and React-specific
+syntax remain rejected. See
+[docs/m4-jsx-compiler.md](docs/m4-jsx-compiler.md) and
+[docs/m4.4.2-function-components.md](docs/m4.4.2-function-components.md).
+The M4.4.2 component implementation uses hierarchical ownership for nested
+components and keeps cleanup within the existing renderer lifecycle.
 
 ## Development
 

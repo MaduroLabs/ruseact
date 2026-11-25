@@ -362,6 +362,22 @@
   `git diff --check` pass on Linux x86_64. The public Chromium harness reached
   the known InstaBox `listen EPERM` loopback restriction; no local browser pass
   is claimed and hosted GitHub Chromium remains authoritative.
+- M4.4.2 implementation — the public renderer now has a narrow version-2
+  component-placement contract and `defineComponent` façade. Function setup is
+  one-shot, props are shallow immutable snapshots, identities are scoped by
+  parent owner/static slot/component type, and nested owners share the root's
+  existing BindingContext and ReactiveCore. Binding resources are disposed
+  child-first in reverse registration order before root host cleanup; borrowed
+  runtimes and application signals remain alive. M4.3 emits version-2 plans
+  for statically named uppercase component references while retaining version-1
+  intrinsic output. Conditional regions, anchors, keyed lists, rerendering,
+  scheduling, and hooks remain deferred.
+- M4.4.2 local validation — PASS for TypeScript typecheck, compiler unit
+  tests, browser harness syntax, release WASM build, and matching
+  `wasm-bindgen-cli 0.2.130` generation. One escalated local Chromium run
+  passed 76 M4.3/M4.4.2 checks after the normal sandbox was blocked by
+  `listen EPERM` on the temporary loopback server. Hosted Chromium remains
+  authoritative for the pull request.
 
 ## Blockers / decisions
 

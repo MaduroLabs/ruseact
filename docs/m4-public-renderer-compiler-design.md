@@ -1082,3 +1082,22 @@ item-owned scalar signals, and deterministic native range movement. Unkeyed
 lists, implicit dependency inference, and generic mutable-tree reconciliation
 remain unsupported. The authoritative detail is in
 [docs/m4.4.4-keyed-lists.md](m4.4.4-keyed-lists.md).
+
+## M4.5.1 package distribution note
+
+The existing renderer/compiler contracts are packaged for isolated
+verification as private synchronized `0.1.0-alpha.0` tarballs. `ruseact` and
+`ruseact-dom` remain the runtime package boundary, while `ruseact-compiler`
+remains build-time tooling. The package build emits ESM, declarations, source
+maps, and the release WASM assets without changing template protocols 1–4,
+manual flush, ownership, or error semantics. The compiler is not imported by
+the browser runtime.
+
+The distribution pipeline preserves canonical runtime identity by making DOM
+runtime imports resolve through the installed `ruseact` package. It keeps WASM
+initialization explicit through `createReactiveCore(loadWasm)` and verifies
+installed artifacts in a temporary external consumer, including real Node and
+Chromium execution. Tarball production, manifest checksums, and local
+verification are described in
+[docs/m4.5-package-distribution.md](m4.5-package-distribution.md). This is not
+npm publication or a long-term API-stability claim.

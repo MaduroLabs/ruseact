@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "noEmit": false,
+    "rootDir": "packages",
+    "outDir": "target/browser-output"
+  },
+  "include": ["packages/**/*.ts"]
+}

@@ -27,7 +27,7 @@ function typeFor(file) {
 }
 
 function page(sourceSha, browser) {
-  return `<!doctype html><html><body data-status="pending"><script type="module">
+  return `<!doctype html><html><head><script type="importmap">{"imports":{"ruseact":"./ruseact/src/index.js"}}</script></head><body data-status="pending"><script type="module">
 const sourceSha = ${JSON.stringify(sourceSha)};
 const browser = ${JSON.stringify(browser)};
 function ok(value) { return { ok: true, value }; }
@@ -92,7 +92,7 @@ const compiledRoot = mkdtempSync(path.join(repositoryRoot, "target", "m4.4.4-key
 cpSync(bindingDirectory, path.join(temporaryRoot, "generated"), { recursive: true });
 let server;
 try {
-  execFileSync("corepack", ["pnpm", "exec", "tsc", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "Bundler", "--strict", "--skipLibCheck", "--declaration", "false", "--noEmit", "false", "--rootDir", "packages", "--outDir", temporaryRoot, "packages/ruseact/src/index.ts", "packages/ruseact-dom/src/index.ts"], { cwd: repositoryRoot, stdio: "inherit" });
+  execFileSync(process.execPath, [path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), temporaryRoot], { cwd: repositoryRoot, stdio: "inherit" });
   writeFileSync(path.join(temporaryRoot, "package.json"), JSON.stringify({ type: "module" }));
   writeFileSync(path.join(temporaryRoot, "index.html"), page(process.env.RUSEACT_BENCHMARK_SOURCE_SHA ?? "not supplied", browser.version));
   server = createServer((request, response) => {

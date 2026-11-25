@@ -41,32 +41,8 @@ function findBrowser() {
 
 function compileRuntime(outputDirectory) {
   execFileSync(
-    "corepack",
-    [
-      "pnpm",
-      "exec",
-      "tsc",
-      "--target",
-      "ES2022",
-      "--module",
-      "ESNext",
-      "--moduleResolution",
-      "Bundler",
-      "--strict",
-      "--skipLibCheck",
-      "--declaration",
-      "false",
-      "--noEmit",
-      "false",
-      "--rootDir",
-      "packages",
-      "--outDir",
-      outputDirectory,
-      "packages/ruseact/src/index.ts",
-      "packages/ruseact-dom/src/host.ts",
-      "packages/ruseact-dom/src/bindings.ts",
-      "packages/ruseact-dom/src/root.ts",
-    ],
+    process.execPath,
+    [path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), outputDirectory],
     { cwd: repositoryRoot, stdio: "inherit" },
   );
 }
@@ -80,7 +56,7 @@ function contentType(filePath) {
 
 function browserPage(sourceSha, browserVersion, toolchain) {
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Ruseact M3.5 DOM benchmark</title></head>
+<html><head><meta charset="utf-8"><title>Ruseact M3.5 DOM benchmark</title><script type="importmap">{"imports":{"ruseact":"./ruseact/src/index.js"}}</script></head>
 <body data-status="pending">
 <script type="module">
   import initializeWasm, * as wasm from "./generated/ruseact_wasm.js";

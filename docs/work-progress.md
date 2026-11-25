@@ -2,11 +2,11 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.4.4-keyed-lists`
+- Branch: `feature/m4.5.1-package-distribution`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `5c3a3785e3e4d237fdc81554b57fd359c94e4336`
-- Last verified on: Linux x86_64, 2026-11-25 for M4.4.4 keyed-list
-  implementation;
+- Baseline: `origin/develop` at `1d222039f6e487cbfa137d65236ada15a93f42d2`
+- Last verified on: Linux x86_64, 2026-11-25 for M4.5.1 package
+  distribution;
   M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
   integrity passed before this implementation branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
@@ -217,7 +217,8 @@
   M4.4.2 component subset; M4.4.3 conditional decisions are now approved.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
-- [ ] Add consumer verification in `ruseact-examples` after package output exists.
+- [ ] Add consumer applications in `ruseact-examples` in a later consumer
+  milestone; M4.5.1 keeps that repository out of scope.
 
 - [x] Implement M4.4.3 private comment anchors, version-3 conditional plans,
   explicit boolean selector dependencies, cleanup-first branch replacement,
@@ -231,8 +232,42 @@
 - [x] Add the real-WASM Chromium conditional harness covering anchor safety,
   branch switching, empty/multi-node branches, nested components, rollback,
   external DOM interference, deferred generated work, and resource bounds.
-- [ ] Complete hosted CI verification for M4.4.3 and leave the PR open for
-  human review; keyed lists remain deferred to M4.4.4.
+- [x] Complete M4.4.4 keyed-list implementation and promotion; hosted browser
+  and benchmark verification passed before this distribution branch.
+- [x] Add synchronized private `0.1.0-alpha.0` package metadata for
+  `ruseact`, `ruseact-dom`, and `ruseact-compiler`, preserving the three
+  package boundaries and canonical installed runtime identity.
+- [x] Add locked release WASM packaging for matching Node and web
+  `wasm-bindgen` outputs, with explicit package loader subpaths and no
+  import-time runtime initialization.
+- [x] Add ESM/declaration/source-map distribution builds, tarball creation,
+  checksum/provenance manifest generation, and artifact validation.
+- [x] Add isolated consumer verification outside the workspace covering
+  installed declarations, Node runtime/compiler smoke tests, runtime-only
+  package separation, and real Chromium protocol 1–4 fixtures.
+- [ ] Complete hosted CI distribution verification and leave the M4.5.1 PR
+  open for human review; npm publication and M4.5.2 remain deferred.
+
+### M4.5.1 package distribution verification
+
+- `corepack pnpm install --frozen-lockfile` — PASS with approved execution
+  access; the unprivileged InstaBox process cannot open pnpm's store operation
+  lock, while the lockfile itself is current and passes supply-chain policy.
+- `corepack pnpm build:distribution` — PASS; release `wasm32-unknown-unknown`
+  build and matching Node/web `wasm-bindgen` assets generated.
+- `corepack pnpm pack:packages` — PASS; generated three synchronized private
+  `0.1.0-alpha.0` tarballs and `target/distribution/distribution-manifest.json`.
+- `corepack pnpm validate:distribution` — PASS; packed metadata, entry points,
+  declarations, source maps, WASM files, workspace dependency removal, nested
+  Node loader boundary, and checksums validated.
+- `corepack pnpm test:packages` — PASS with approved execution; installed
+  package declarations typechecked, installed Node/WASM/compiler smoke passed,
+  38 isolated Chromium checks passed, and the runtime-only consumer passed.
+- `corepack pnpm benchmark:browser:dom` followed by
+  `corepack pnpm benchmark:dom:validate` — PASS; 56 valid rows and 0
+  unresolved rows after the canonical package-import compiler fix.
+- Local host limitation: Node is `22.23.3`; the repository-pinned CI runtime is
+  Node `24.22.3` from `.nvmrc`. No pinned toolchain was changed.
 
 ## Commands verified
 

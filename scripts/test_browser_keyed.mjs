@@ -42,7 +42,7 @@ function runBrowser(command, args) {
 }
 
 function browserPage() {
-  return String.raw`<!doctype html><html><body data-status="pending"><script>
+  return String.raw`<!doctype html><html><body data-status="pending"><script type="importmap">{"imports":{"ruseact":"./ruseact/src/index.js"}}</script><script>
 window.__ruseactPublish = (result) => {
   document.body.dataset.status = result.ok ? "passed" : "failed";
   document.body.dataset.testResult = encodeURIComponent(JSON.stringify(result));
@@ -228,7 +228,7 @@ const compilerOutput = mkdtempSync(path.join(repositoryRoot, "target", "m4.4.4-b
 cpSync(bindingDirectory, path.join(temporaryRoot, "generated"), { recursive: true });
 let server;
 try {
-  execFileSync("corepack", ["pnpm", "exec", "tsc", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "Bundler", "--strict", "--skipLibCheck", "--declaration", "false", "--noEmit", "false", "--rootDir", "packages", "--outDir", compilerOutput, "packages/ruseact/src/index.ts", "packages/ruseact-dom/src/index.ts", "packages/ruseact-compiler/src/index.ts"], { cwd: repositoryRoot, stdio: "inherit" });
+  execFileSync(process.execPath, [path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), compilerOutput], { cwd: repositoryRoot, stdio: "inherit" });
   writeFileSync(path.join(compilerOutput, "package.json"), JSON.stringify({ type: "module" }));
   const compiler = await import(pathToFileURL(path.join(compilerOutput, "ruseact-compiler", "src", "index.js")));
   const compiled = compiler.compileTsxModule(`export function createView({ revision, items }) {
@@ -239,7 +239,7 @@ try {
 }`, { fileName: "keyed-browser.tsx" });
   if (!compiled.ok) throw new Error(`keyed compiler fixture failed: ${JSON.stringify(compiled.diagnostics)}`);
   writeFileSync(path.join(temporaryRoot, "compiled_keyed.js"), compiled.code);
-  execFileSync("corepack", ["pnpm", "exec", "tsc", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "Bundler", "--strict", "--skipLibCheck", "--declaration", "false", "--noEmit", "false", "--rootDir", "packages", "--outDir", temporaryRoot, "packages/ruseact/src/index.ts", "packages/ruseact-dom/src/index.ts"], { cwd: repositoryRoot, stdio: "inherit" });
+  execFileSync(process.execPath, [path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), temporaryRoot], { cwd: repositoryRoot, stdio: "inherit" });
   writeFileSync(path.join(temporaryRoot, "package.json"), JSON.stringify({ type: "module" }));
   writeFileSync(path.join(temporaryRoot, "index.html"), browserPage());
   server = createServer((request, response) => {

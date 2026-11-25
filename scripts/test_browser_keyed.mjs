@@ -66,10 +66,12 @@ function emptyPlan() { return { nodes: [], bindings: [], listeners: [] }; }
 function itemPlan(environment, setupCounts, clicks) {
   const textId = "item-text";
   const buttonId = "item-button";
+  const inputId = "item-input";
   return success({
     nodes: [
       { id: buttonId, kind: "element", name: "button" },
       { id: textId, kind: "text", text: "", parentId: buttonId },
+      { id: inputId, kind: "element", name: "input", properties: [{ property: "value", value: String(environment.data.label) }] },
     ],
     bindings: [{ kind: "text", slot: "item-label", targetId: textId, dependencies: [environment.fields.label], evaluate: ({ runtime }) => runtime.get(environment.fields.label) }],
     listeners: [{ id: "item-click", targetId: buttonId, type: "click", listener: () => { clicks.push(environment.key); } }],
@@ -102,12 +104,15 @@ try {
   value(root.mount(listView(revision, collectionRef, setupCounts, clicks)), "initial keyed mount", root);
   const header = container.querySelector("header"); const footer = container.querySelector("footer");
   const itemButtons = () => Array.from(container.querySelectorAll("section > button"));
+  const itemInputs = () => Array.from(container.querySelectorAll("section > input"));
   const labels = () => itemButtons().map((button) => button.textContent);
   check(labels().join(",") === "A,B,C", "initial keyed order");
   check(setupCounts.length === 3, "initial setup once per item");
   const initialButtons = new Map([["a", itemButtons()[0]], [2, itemButtons()[1]], [true, itemButtons()[2]]]);
-  initialButtons.get(2).focus();
-  check(document.activeElement === initialButtons.get(2), "initial retained input focus target is active");
+  const initialInputs = new Map([["a", itemInputs()[0]], [2, itemInputs()[1]], [true, itemInputs()[2]]]);
+  initialInputs.get(2).value = "user-edited";
+  initialInputs.get(2).focus();
+  check(document.activeElement === initialInputs.get(2), "initial retained input focus target is active");
 
   collectionRef.value = [{ key: true, label: "C" }, { key: "a", label: "A" }, { key: 2, label: "B" }, { key: "new", label: "D" }];
   value(runtime.set(revision, 1), "revision write for reorder");
@@ -118,7 +123,9 @@ try {
   check(setupCounts.length === 4 && setupCounts.filter((key) => key === "new").length === 1, "only inserted item sets up");
   check(container.querySelector("header") === header && container.querySelector("footer") === footer, "unrelated sibling identities survive reorder");
   check(initialButtons.get("a") === itemButtons()[1] && initialButtons.get(2) === itemButtons()[2] && initialButtons.get(true) === itemButtons()[0], "retained DOM identities survive reorder");
-  check(document.activeElement === initialButtons.get(2) || document.activeElement === document.body, "native range movement reports browser focus behavior");
+  check(initialInputs.get("a") === itemInputs()[1] && initialInputs.get(2) === itemInputs()[2] && initialInputs.get(true) === itemInputs()[0], "retained input identities survive reorder");
+  check(initialInputs.get(2).value === "user-edited", "retained uncontrolled input value survives reorder");
+  check(document.activeElement === initialInputs.get(2) || document.activeElement === document.body, "native range movement reports browser focus behavior");
 
   const beforeNoop = itemButtons().slice();
   collectionRef.value = [{ key: true, label: "C" }, { key: "a", label: "A" }, { key: 2, label: "B" }, { key: "new", label: "D" }];
@@ -136,6 +143,7 @@ try {
   check(labels().join(",") === "B updated,C", "retained scalar data updates after deferred flush");
   check(setupCounts.length === 4, "retained data does not rerun item setup");
   check(initialButtons.get(2) === itemButtons()[0], "retained key DOM is preserved during data update");
+  check(initialInputs.get(2) === itemInputs()[0] && initialInputs.get(2).value === "user-edited", "retained input state survives data update");
 
   collectionRef.value = [{ key: 2, label: "B updated" }, { key: 2, label: "duplicate" }];
   value(runtime.set(revision, 4), "revision write for duplicate validation");

@@ -489,7 +489,7 @@
 - [x] Added the provisional compiler-only `ruseact.keyed` marker and
   deterministic version-4 output while preserving versions 1–3.
 - [x] Added real-WASM Chromium keyed-list coverage and a bounded keyed-list
-  benchmark/integrity validator. Escalated local Chromium passed 88 keyed
+  benchmark/integrity validator. Escalated local Chromium passed 91 keyed
   checks; hosted CI remains authoritative for the PR.
 - [x] Existing DOM, binding, root, public renderer, compiler, conditional, and
   M3.5 end-to-end Chromium suites passed in the escalated local harness after

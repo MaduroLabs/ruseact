@@ -200,7 +200,6 @@ function runRuntimeOnlyConsumer() {
       version: "0.0.0",
       private: true,
       type: "module",
-      packageManager: "pnpm@12.16.1",
       dependencies: {
         ruseact: `file:./artifacts/ruseact-${version}.tgz`,
         "ruseact-dom": `file:./artifacts/ruseact-dom-${version}.tgz`,
@@ -235,7 +234,6 @@ try {
     version: "0.0.0",
     private: true,
     type: "module",
-    packageManager: "pnpm@12.16.1",
     dependencies: Object.fromEntries(packageNames.map((name) => [name, `file:./artifacts/${name}-${version}.tgz`])),
     devDependencies: { typescript: "5.9.3" },
   }, null, 2)}\n`);

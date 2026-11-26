@@ -3,12 +3,19 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  packageArtifactFileName,
+  readDistributionMetadata,
+  validateArtifactIdentity,
+  validatePackedPackageMetadata,
+} from "./distribution_metadata.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distributionRoot = path.join(repositoryRoot, "target", "distribution");
 const manifestPath = path.join(distributionRoot, "distribution-manifest.json");
-const packageVersion = "0.1.0-alpha.0";
-const expectedPackages = new Set(["ruseact", "ruseact-dom", "ruseact-compiler"]);
+const distributionMetadata = readDistributionMetadata(repositoryRoot);
+const { packageNames, version: packageVersion } = distributionMetadata;
+const expectedPackages = new Set(packageNames);
 
 function fail(message) { throw new Error(`distribution validation failed: ${message}`); }
 function sha256(filePath) { return createHash("sha256").update(readFileSync(filePath)).digest("hex"); }
@@ -26,17 +33,27 @@ if (manifest.sourceTree?.status === "dirty" && !Array.isArray(manifest.sourceTre
 if (!Array.isArray(manifest.packages) || manifest.packages.length !== expectedPackages.size) fail("package manifest count mismatch");
 
 for (const artifact of manifest.packages) {
+  try {
+    validateArtifactIdentity(artifact, distributionMetadata);
+  } catch (error) {
+    fail(error.message);
+  }
   if (!expectedPackages.has(artifact.name)) fail(`unexpected package ${artifact.name}`);
-  if (artifact.version !== packageVersion) fail(`${artifact.name}: version mismatch`);
   const filePath = path.join(distributionRoot, artifact.file);
   if (!existsSync(filePath)) fail(`${artifact.name}: artifact is missing`);
   if (statSync(filePath).size !== artifact.bytes) fail(`${artifact.name}: byte-size mismatch`);
   if (sha256(filePath) !== artifact.sha256) fail(`${artifact.name}: checksum mismatch`);
   const entries = new Set(tarEntries(filePath));
   const packageJson = tarPackageJson(filePath);
-  if (packageJson.name !== artifact.name || packageJson.version !== packageVersion) fail(`${artifact.name}: packed metadata mismatch`);
-  if (packageJson.private !== true) fail(`${artifact.name}: private package status was not preserved`);
-  if ([...JSON.stringify(packageJson).matchAll(/workspace:/g)].length > 0) fail(`${artifact.name}: workspace dependency escaped into tarball`);
+  try {
+    validatePackedPackageMetadata(artifact.name, packageJson, distributionMetadata);
+  } catch (error) {
+    fail(error.message);
+  }
+  if (!entries.has("package/LICENSE")) fail(`${artifact.name}: MIT license notice is missing`);
+  const packagedLicense = execFileSync("tar", ["-xOf", filePath, "package/LICENSE"], { encoding: "utf8" });
+  const sourceLicense = readFileSync(path.join(repositoryRoot, "LICENSE"), "utf8");
+  if (packagedLicense !== sourceLicense) fail(`${artifact.name}: packaged license notice differs from repository LICENSE`);
   if (entries.has("package/node_modules/") || [...entries].some((entry) => entry.includes("node_modules/"))) fail(`${artifact.name}: node_modules included in tarball`);
   if (!entries.has("package/dist/index.js") || !entries.has("package/dist/index.d.ts")) fail(`${artifact.name}: executable or declaration entry is missing`);
   if (![...entries].some((entry) => entry.endsWith(".js.map"))) fail(`${artifact.name}: JavaScript source map is missing`);
@@ -60,6 +77,10 @@ for (const artifact of manifest.packages) {
 }
 
 if (manifest.packages.map((entry) => entry.version).some((version) => version !== packageVersion)) fail("package versions are not synchronized");
+if (new Set(manifest.packages.map((entry) => entry.name)).size !== expectedPackages.size) fail("package names are not unique");
+if (manifest.packages.some((entry) => entry.file !== path.posix.join("artifacts", packageArtifactFileName(entry.name, packageVersion)))) {
+  fail("artifact filenames do not match the source package version");
+}
 if (JSON.stringify(manifest.supportedTemplateProtocols) !== JSON.stringify([1, 2, 3, 4])) fail("supported protocol range is incorrect");
 console.log(`Distribution manifest validated: ${manifestPath}`);
 for (const artifact of manifest.packages) console.log(`${artifact.name}@${artifact.version}: ${artifact.bytes} bytes, sha256 ${artifact.sha256}`);

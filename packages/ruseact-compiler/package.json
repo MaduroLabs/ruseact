@@ -1,6 +1,6 @@
 {
   "name": "ruseact-compiler",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "private": true,
   "type": "module",
   "repository": {
@@ -8,7 +8,8 @@
     "url": "https://github.com/MaduroLabs/ruseact.git"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

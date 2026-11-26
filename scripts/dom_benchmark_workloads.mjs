@@ -8,10 +8,10 @@ const UPDATE_CYCLES = 16;
 const UNCHANGED_CYCLES = 192;
 
 // The shared M2.5 calibrator is intentionally bounded at 64 batches. These
-// floors and bounded repetition counts apply only to the M3.5 timed workload
-// definitions: they keep the fastest size-1 and size-10 cases measurable
-// without changing the individual DOM or reactive operation semantics. The
-// final calibrated operation count is recorded in every result row.
+// Floors and bounded repetition counts apply only to the M3.5 timed workload
+// definitions: they keep evidenced fast cases measurable without changing an
+// individual DOM or reactive operation. The final calibrated operation count
+// is recorded in every result row.
 function ruseactLifecycleOperations(size) {
   return size <= 10 ? 128 : 1;
 }
@@ -39,8 +39,14 @@ function nativeTextCycles(size) {
   return UPDATE_CYCLES;
 }
 
-function nativeAttributePropertyCycles(size) {
-  return size === 1 ? 128 : UPDATE_CYCLES;
+export function ruseactSharedSignalCycles(size) {
+  return size === 1 ? 32 : UPDATE_CYCLES;
+}
+
+export function nativeAttributePropertyCycles(size) {
+  if (size === 1) return 128;
+  if (size === 10) return 32;
+  return UPDATE_CYCLES;
 }
 
 function nativeUnmountOperations(size) {
@@ -49,9 +55,9 @@ function nativeUnmountOperations(size) {
   return 5_000;
 }
 
-function nativeLifecycleOperations(size) {
+export function nativeLifecycleOperations(size) {
   if (size <= 10) return 10_000;
-  if (size === 100) return 2;
+  if (size === 100) return 4;
   return 1;
 }
 
@@ -453,26 +459,27 @@ async function ruseactRows(results, clock, runtimeModule, rootModule, wasmModule
     cleanupRuseact,
     (observed, state) => check(observed === UPDATE_CYCLES && state.nodes.every((node) => node.nodeValue === `value:${UPDATE_CYCLES + 2000}`), "batched validation")));
 
+    const fanoutCycles = ruseactSharedSignalCycles(size);
     results.push(await measureWorkload(clock, {
       layer: "typescript-runtime",
       operation: "shared_signal_binding_fanout",
       size,
       graph_size: size,
-      timed_operations: UPDATE_CYCLES,
+      timed_operations: fanoutCycles,
       setup_operations: size,
       cleanup: "dispose mounted root and runtime",
-      m35: ruseactMetadata(size, "targeted-dom-mutation", "shared-signal-fanout-flush-cycle", { ...textOptions, timedDescription: `update ${size} bindings sharing one signal, ${UPDATE_CYCLES} cycles` }),
+      m35: ruseactMetadata(size, "targeted-dom-mutation", "shared-signal-fanout-flush-cycle", { ...textOptions, timedDescription: `update ${size} bindings sharing one signal, ${fanoutCycles} cycles` }),
     },
     () => setupMountedText(runtimeModule, rootModule, wasmModule, size, "shared"),
     (state) => {
-      for (let cycle = 1; cycle <= UPDATE_CYCLES; cycle += 1) {
+      for (let cycle = 1; cycle <= fanoutCycles; cycle += 1) {
         unwrap(state.runtime.set(state.signals[0], cycle), "fanout signal write");
         check(unwrap(state.root.flush(), "fanout flush").executedCount === size, "fanout execution count");
       }
-      return UPDATE_CYCLES;
+      return fanoutCycles;
     },
     cleanupRuseact,
-    (observed, state) => check(observed === UPDATE_CYCLES && state.nodes[0].nodeValue === `value:${UPDATE_CYCLES}`, "fanout validation")));
+    (observed, state) => check(observed === fanoutCycles && state.nodes[0].nodeValue === `value:${fanoutCycles}`, "fanout validation")));
 
     results.push(await measureWorkload(clock, {
       layer: "typescript-runtime",
@@ -715,6 +722,11 @@ export async function runDomBenchmarks({ clock, runtimeModule, rootModule, wasmM
       warmups: BENCHMARK_CONFIG.warmups,
       update_cycles: UPDATE_CYCLES,
       unchanged_cycles: UNCHANGED_CYCLES,
+      repetition_floors: {
+        "typescript-runtime/shared_signal_binding_fanout/1": ruseactSharedSignalCycles(1),
+        "native-dom-reference/native_dom_attribute_property/10": nativeAttributePropertyCycles(10),
+        "native-dom-reference/native_dom_lifecycle_cycle/100": nativeLifecycleOperations(100),
+      },
       calibration_min_duration_ns: BENCHMARK_CONFIG.calibration_min_duration_ns,
       calibration_max_batches: BENCHMARK_CONFIG.calibration_max_batches,
       calibration_max_attempts: BENCHMARK_CONFIG.calibration_max_attempts,

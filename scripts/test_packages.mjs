@@ -5,12 +5,12 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { packageArtifactFileName, readDistributionMetadata } from "./distribution_metadata.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distributionRoot = path.join(repositoryRoot, "target", "distribution");
 const artifactRoot = path.join(distributionRoot, "artifacts");
-const version = "0.1.0-alpha.0";
-const packageNames = ["ruseact", "ruseact-dom", "ruseact-compiler"];
+const { packageNames, version } = readDistributionMetadata(repositoryRoot);
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -192,7 +192,7 @@ function runRuntimeOnlyConsumer() {
     const copiedArtifacts = path.join(runtimeOnlyRoot, "artifacts");
     mkdirSync(copiedArtifacts, { recursive: true });
     for (const name of ["ruseact", "ruseact-dom"]) {
-      const fileName = `${name}-${version}.tgz`;
+      const fileName = packageArtifactFileName(name, version);
       cpSync(path.join(artifactRoot, fileName), path.join(copiedArtifacts, fileName));
     }
     writeFileSync(path.join(runtimeOnlyRoot, "package.json"), `${JSON.stringify({
@@ -200,6 +200,7 @@ function runRuntimeOnlyConsumer() {
       version: "0.0.0",
       private: true,
       type: "module",
+      packageManager: "pnpm@12.16.1",
       dependencies: {
         ruseact: `file:./artifacts/ruseact-${version}.tgz`,
         "ruseact-dom": `file:./artifacts/ruseact-dom-${version}.tgz`,
@@ -218,7 +219,7 @@ function runRuntimeOnlyConsumer() {
 
 const manifestPath = path.join(distributionRoot, "distribution-manifest.json");
 if (!existsSync(manifestPath)) run("corepack", ["pnpm", "build:distribution"]);
-if (!existsSync(path.join(artifactRoot, `ruseact-${version}.tgz`))) run("corepack", ["pnpm", "pack:packages"]);
+if (!existsSync(path.join(artifactRoot, packageArtifactFileName("ruseact", version)))) run("corepack", ["pnpm", "pack:packages"]);
 
 const consumerRoot = mkdtempSync(path.join(tmpdir(), "ruseact-package-consumer-"));
 let server;
@@ -226,7 +227,7 @@ try {
   const copiedArtifacts = path.join(consumerRoot, "artifacts");
   mkdirSync(copiedArtifacts, { recursive: true });
   for (const name of packageNames) {
-    const fileName = `${name}-${version}.tgz`;
+    const fileName = packageArtifactFileName(name, version);
     cpSync(path.join(artifactRoot, fileName), path.join(copiedArtifacts, fileName));
   }
   writeFileSync(path.join(consumerRoot, "package.json"), `${JSON.stringify({
@@ -234,6 +235,7 @@ try {
     version: "0.0.0",
     private: true,
     type: "module",
+    packageManager: "pnpm@12.16.1",
     dependencies: Object.fromEntries(packageNames.map((name) => [name, `file:./artifacts/${name}-${version}.tgz`])),
     devDependencies: { typescript: "5.9.3" },
   }, null, 2)}\n`);

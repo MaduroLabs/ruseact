@@ -182,7 +182,7 @@ M4.1 does not:
 - define hydration, server rendering, worker transfer, or async rendering;
 - expand scalar signals to arbitrary JavaScript values;
 - define a compatibility layer for React APIs; or
-- modify `ruseact-examples`.
+- modify `ruseact-example`.
 
 ## 4. Candidate public renderer API
 
@@ -986,7 +986,7 @@ and explicit mutation-count reporting.
 ### M4.5 — Consumer and Runtime Integration
 
 **Objective:** validate the approved public packages in the separate
-`ruseact-examples` repository and measure realistic application behavior.
+`ruseact-example` repository and measure realistic application behavior.
 
 **Prerequisites:** published or pinned package output, stable public API,
 compiler/runtime version policy, and example-repository coordination.
@@ -1086,7 +1086,8 @@ remain unsupported. The authoritative detail is in
 ## M4.5.1 package distribution note
 
 The existing renderer/compiler contracts are packaged for isolated
-verification as private synchronized `0.1.0-alpha.0` tarballs. `ruseact` and
+verification as private synchronized `0.1.0-alpha.1` tarballs. The original
+alpha.0 measurements remain historical. `ruseact` and
 `ruseact-dom` remain the runtime package boundary, while `ruseact-compiler`
 remains build-time tooling. The package build emits ESM, declarations, source
 maps, and the release WASM assets without changing template protocols 1–4,

@@ -54,6 +54,7 @@ API compatibility is claimed.
 | M3.3 — Reactive DOM bindings | Internal explicit binding prototype complete; no public renderer API |
 | M3.4 — Root mount and lifecycle | Internal root lifecycle prototype complete; no public renderer API |
 | M3.5 — End-to-end DOM integration and benchmark | Complete; hosted Chromium correctness and benchmark integrity passed |
+| M3.5.1 — DOM benchmark calibration hardening | Implemented on the fix branch; hosted verification pending |
 | M4.1 — Public renderer and compiler contract design | Complete; M4.2 subset approved |
 | M4.2 — Public renderer MVP | Complete; hosted Chromium verification passed |
 | M4.3 — JSX/TSX compiler MVP | Complete; hosted Chromium verification passed |
@@ -359,6 +360,15 @@ strict machine-readable integrity checks. Hosted Chromium is authoritative;
 the InstaBox localhost browser limitation means local browser execution is
 not reported as a pass. Numeric results are published as CI artifacts and
 summarized in [the M3.5 benchmark report](docs/benchmarks/m3.5-dom-e2e-baseline.md).
+
+M3.5.1 keeps the same strict integrity policy while adding three bounded,
+workload-specific repetition floors for fast cases that repeatedly exhausted
+the 64-batch calibration cap: size-1 shared fan-out uses 32 cycles, size-10
+native attribute/property mutation uses 32 cycles, and size-100 native
+lifecycle uses 4 cycles. These floors execute additional real operations and
+are recorded in the result configuration; they do not widen dispersion gates,
+filter samples, or convert unresolved rows into valid measurements. See the
+[M3.5.1 calibration record](docs/benchmarks/m3.5.1-dom-calibration-hardening.md).
 
 ## M4.1 public renderer and compiler contract design
 

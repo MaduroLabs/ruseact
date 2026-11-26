@@ -102,11 +102,12 @@ function value(result, name, root) {
 }
 function success(value) { return { ok: true, value }; }
 try {
-  const [{ default: initializeWasm, ...wasm }, runtimeModule, dom, v1, v2, v3, v4] = await Promise.all([
+  const [{ default: initializeWasm, ...wasm }, runtimeModule, dom, v1, v2, v3, v4, v3NestedOuter, v3NestedInner] = await Promise.all([
     import("/node_modules/ruseact/wasm/web/ruseact_wasm.js"),
     import("/node_modules/ruseact/dist/index.js"),
     import("/node_modules/ruseact-dom/dist/index.js"),
     import("/v1.mjs"), import("/v2.mjs"), import("/v3.mjs"), import("/v4.mjs"),
+    import("/v3-nested-outer.mjs"), import("/v3-nested-inner.mjs"),
   ]);
   await initializeWasm();
 
@@ -138,6 +139,23 @@ try {
   check(conditionalContainer.textContent === "HeaderOnFooter", "version 3 true branch"); check(conditionalContainer.querySelector("header") === header && conditionalContainer.querySelector("footer") === footer, "version 3 sibling identity");
   value(conditionalRoot.dispose(), "version 3 cleanup", conditionalRoot); value(runtime3.dispose(), "version 3 runtime cleanup");
 
+  const nestedRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "nested packaged runtime initializes");
+  const nestedOuter = value(nestedRuntime.createSignal(false), "nested packaged outer selector");
+  const nestedInner = value(nestedRuntime.createSignal(false), "nested packaged inner selector");
+  let nestedSetupCount = 0;
+  const Nested = dom.defineComponent("PackagedNested", () => { nestedSetupCount += 1; return success(v3NestedInner.createView({ selector: nestedInner })); });
+  const nestedContainer = document.createElement("main"); document.body.append(nestedContainer);
+  const nestedRoot = value(dom.createRoot(nestedContainer, nestedRuntime), "nested packaged root creates");
+  const nestedView = v3NestedOuter.createView({ selector: nestedOuter, Nested });
+  check(nestedView.version === 3, "nested packaged compiler emits version 3");
+  value(nestedRoot.mount(nestedView), "nested packaged r0 mount", nestedRoot);
+  check(nestedContainer.textContent === "off" && nestedSetupCount === 0, "nested packaged inactive branch is lazy");
+  value(nestedRuntime.set(nestedOuter, true), "nested packaged outer update"); value(nestedRoot.flush(), "nested packaged outer flush", nestedRoot);
+  check(nestedContainer.textContent === "off" && nestedSetupCount === 1, "nested packaged component mounts once");
+  value(nestedRuntime.set(nestedInner, true), "nested packaged inner update"); value(nestedRoot.flush(), "nested packaged inner flush", nestedRoot);
+  check(nestedContainer.textContent === "on" && nestedSetupCount === 1, "nested packaged duplicate r0 updates independently");
+  value(nestedRoot.dispose(), "nested packaged cleanup", nestedRoot); value(nestedRuntime.dispose(), "nested packaged runtime cleanup");
+
   const runtime4 = value(await runtimeModule.createReactiveCore(() => wasm), "version 4 runtime initializes");
   const revision = value(runtime4.createSignal(0), "version 4 revision signal");
   const items = { value: [{ id: "a", label: "A" }, { id: "b", label: "B" }] };
@@ -160,7 +178,11 @@ function writeConsumerFiles(consumerRoot, compiler) {
   const componentResult = compileFixture(compiler, `export function createView({ Badge }) { return <main><Badge /></main>; }`, "v2.tsx", fixtureRoot);
   const conditionalResult = compileFixture(compiler, `export function createView({ visible }) { return <main><header>Header</header>{ruseact.conditional([visible], ({ runtime }) => runtime.get(visible), () => <p>On</p>, () => <p>Off</p>)}<footer>Footer</footer></main>; }`, "v3.tsx", fixtureRoot);
   const keyedResult = compileFixture(compiler, `export function createView({ revision, items }) { return <ul>{ruseact.keyed([revision], ({ runtime }) => ({ ok: true, value: items.value.map((item) => ({ key: item.id, fields: { label: item.label } })) }), ({ fields }) => <li>{ruseact.bindText([fields.label], ({ runtime: currentRuntime }) => currentRuntime.get(fields.label))}</li>)}</ul>; }`, "v4.tsx", fixtureRoot);
-  for (const result of [staticResult, componentResult, conditionalResult, keyedResult]) assert.equal(result.result.ok, true);
+  const nestedOuterResult = compileFixture(compiler, `export function createView({ selector, Nested }) { return <div>{ruseact.conditional([selector], ({ runtime }) => runtime.get(selector), () => <Nested />, () => <p>off</p>)}</div>; }`, "v3-nested-outer.tsx", fixtureRoot);
+  const nestedInnerResult = compileFixture(compiler, `export function createView({ selector }) { return <section>{ruseact.conditional([selector], ({ runtime }) => runtime.get(selector), () => <b>on</b>, () => <i>off</i>)}</section>; }`, "v3-nested-inner.tsx", fixtureRoot);
+  for (const result of [staticResult, componentResult, conditionalResult, keyedResult, nestedOuterResult, nestedInnerResult]) assert.equal(result.result.ok, true);
+  assert.equal(nestedOuterResult.result.metadata.slots.find((slot) => slot.kind === "conditional")?.id, "r0");
+  assert.equal(nestedInnerResult.result.metadata.slots.find((slot) => slot.kind === "conditional")?.id, "r0");
   writeFileSync(path.join(consumerRoot, "index.html"), browserPage());
 }
 

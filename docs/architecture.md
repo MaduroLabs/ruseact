@@ -987,3 +987,38 @@ version-4 keyed fixtures in Chromium. Local artifact production is verified by
 the package scripts and CI distribution job; npm publication, tags, releases,
 automatic publishing, and the separate examples repository remain out of
 scope. See [the M4.5.1 distribution design](m4.5-package-distribution.md).
+
+## Decision 33: M4.4.5 scopes structural registration by owner instance
+
+The M4.4.3/M4.4.4 compiler legitimately reuses template-local structural IDs
+such as `r0` in independent component and branch plans. The binding context
+must not treat those local IDs as globally unique within a root. The M4.4.5
+implementation keeps one shared binding context but uses the exact private
+owner object and local region ID as the registration namespace, while retaining
+the structural kind (`conditional` or `keyed`) in the record. The private
+registry is weakly scoped by owner object and does not use diagnostic owner
+strings, random IDs, or a process-wide counter as authoritative identity.
+
+Duplicate local IDs remain rejected within one owner scope, and existing plan
+validation continues to reject duplicate region IDs within one plan.
+Conditional and keyed registration now use the same identity strategy; keyed
+registration no longer encodes `owner.id` into a string key. Computation handles
+remain the authoritative pending-dispatch identity and are not replaced by
+owner IDs.
+
+Registration reserves its scoped identity before initial structural evaluation,
+so nested registration cannot overwrite an active record. Successful cleanup
+releases the exact record and scoped identity. Failed dependency or computation
+cleanup retains the record and scope reservation and fails closed. This keeps
+same-snapshot disposal authorization tied to the exact successfully disposed
+computation and preserves FIFO dispatch, one-pass flushing, deferred generated
+work, unknown-computation rejection, and all renderer protocol versions 1–4.
+
+The confirmed defect was reproduced through the installed consumer artifacts:
+an outer `r0` conditional could not mount a component containing another `r0`
+conditional. The real-WASM Chromium regression now covers nested components,
+repeated component instances, conditional/keyed composition, fresh activation,
+same-snapshot disposal, and same-scope duplicate rejection. See
+[the M4.4.5 identity hardening record](m4.4.5-structural-identity.md). The
+consumer's existing `0.1.0-alpha.0` tarballs remain unchanged; a new matching
+artifact set, preferably `0.1.0-alpha.1`, is required after promotion.

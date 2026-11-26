@@ -560,3 +560,31 @@ artifacts must not be replaced by this framework branch. After merge and
 promotion, rebuild and publish a new matching experimental distribution,
 preferably `0.1.0-alpha.1`, before resuming the consumer Conditional
 Playground.
+
+## M3.5.1 DOM benchmark calibration hardening
+
+- [x] Retrieved and inspected the latest failed M3.5 artifact `15088440571`
+  and previous artifact `15085983459` from workflow `45752119618`. Both
+  showed bounded cap/attempt exhaustion with capped official samples rejected
+  by the existing quantization-aware IQR gate; no zero, non-finite, or
+  correctness rows were involved.
+- [x] Reproduced the same measurement-quality class locally before editing:
+  56 rows, 55 valid, and one unresolved fast Ruseact fan-out row. The
+  unresolved workload shifted from the hosted native rows, supporting runner
+  timing variability rather than a deterministic DOM correctness failure.
+- [x] Added bounded, workload-specific real-operation floors: shared fan-out
+  size 1 from 16 to 32 cycles, native attribute/property size 10 from 16 to
+  32 cycles, and native lifecycle size 100 from 2 to 4 operations.
+- [x] Added deterministic floor assertions to the existing calibration
+  regression suite without changing the shared 64-batch/3-attempt limits or
+  any statistical acceptance gate.
+- [x] Three independently recorded post-change Chromium runs each produced
+  56 valid rows and zero unresolved rows; the canonical result also passed
+  `benchmark:dom:validate`.
+- [x] M2.5 artifacts validated at 263 Node and 263 Chromium rows; the keyed
+  benchmark validated at 12 rows.
+
+The local environment used Node `22.23.3` because the pinned Node `24.22.3`
+binary was unavailable; pnpm `12.16.1`, Rust `1.99.0`, TypeScript `5.9.3`,
+wasm-bindgen `0.2.130`, and Chromium `154.0.8037.57` were recorded. Hosted CI
+remains authoritative. PR #63 and the consumer repository remain untouched.

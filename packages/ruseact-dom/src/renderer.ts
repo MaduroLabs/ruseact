@@ -1060,7 +1060,13 @@ function mountConditional(
     return success(undefined);
   };
 
-  const structural = scope.registerStructural({ dependencies: condition.dependencies, key: condition.id, update });
+  const structural = scope.registerStructural({
+    scope: owner,
+    kind: "conditional",
+    dependencies: condition.dependencies,
+    key: condition.id,
+    update,
+  });
   if (!structural.ok) {
     const cleaned = owner.dispose();
     return cleaned.ok ? structural : failure(rendererError("child_cleanup_failed", "mount_conditional", "structural registration failed and cleanup also failed", { cleanupCode: cleaned.error.code, cleanupOperation: cleaned.error.operation }));
@@ -1389,8 +1395,10 @@ function mountKeyedList(
     state: "initializing",
   };
   const structural = scope.registerStructural({
+    scope: owner,
+    kind: "keyed",
     dependencies: plan.dependencies,
-    key: `keyed:${owner.id}:${plan.id}`,
+    key: plan.id,
     update: () => updateKeyedList(scope, runtime, record),
   });
   if (!structural.ok) {

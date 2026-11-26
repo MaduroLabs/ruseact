@@ -562,3 +562,29 @@ The local environment used Node `22.23.3` because the pinned Node `24.22.3`
 binary was unavailable; pnpm `12.16.1`, Rust `1.99.0`, TypeScript `5.9.3`,
 wasm-bindgen `0.2.130`, and Chromium `154.0.8037.57` were recorded. Hosted CI
 remains authoritative. PR #63 and the consumer repository remain untouched.
+
+## M4.4.5 structural identity hardening
+
+- [x] Reproduced the consumer failure before the fix: the installed
+  `0.1.0-alpha.0` packages failed when an outer conditional mounted a component
+  containing a nested conditional with the same local ID `r0`.
+- [x] Confirmed the cause: conditional registration used one root-scoped
+  string set while the compiler emits local IDs per plan; keyed registration
+  used a separate diagnostic-owner string encoding.
+- [x] Scoped conditional and keyed structural registration by the exact
+  private owner object, local ID, and structural kind without changing public
+  plan protocols or the Rust/WASM ABI.
+- [x] Reserved scoped identities before initial structural evaluation and
+  retained failed cleanup records and scope reservations for fail-closed
+  behavior.
+- [x] Expanded the real Rust/WASM Chromium conditional suite to 217 checks for
+  nested/repeated scopes, mixed conditional/keyed composition, same-snapshot
+  disposal, repeated activation, and same-scope duplicate rejection.
+- [x] Existing compiler and keyed-list Chromium suites passed (91 keyed
+  checks); full workspace validation remains to be run before PR publication.
+
+The consumer worktree remains unchanged and its vendored `0.1.0-alpha.0`
+artifacts must not be replaced by this framework branch. After merge and
+promotion, rebuild and publish a new matching experimental distribution,
+preferably `0.1.0-alpha.1`, before resuming the consumer Conditional
+Playground.

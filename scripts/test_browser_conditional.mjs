@@ -141,11 +141,13 @@ function browserPage() {
 
       try {
         window.__ruseactStage = "importing-modules";
-        const [{ default: initializeWasm, ...wasm }, runtimeModule, domModule, compiled] = await Promise.all([
+        const [{ default: initializeWasm, ...wasm }, runtimeModule, domModule, compiled, compiledNestedOuter, compiledNestedInner] = await Promise.all([
           import("./generated/ruseact_wasm.js"),
           import("./ruseact/src/index.js"),
           import("./ruseact-dom/src/index.js"),
           import("./compiled_conditional.js"),
+          import("./compiled_nested_outer.js"),
+          import("./compiled_nested_inner.js"),
         ]);
         await initializeWasm();
         window.__ruseactStage = "wasm-initialized";
@@ -329,6 +331,31 @@ function browserPage() {
         value(compiledRuntime.dispose(), "compiled conditional runtime disposal");
         document.body.removeChild(compiledContainer);
 
+        const compiledNestedRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "compiled nested runtime initializes");
+        const compiledNestedOuterSignal = value(compiledNestedRuntime.createSignal(false), "compiled nested outer selector creation");
+        const compiledNestedInnerSignal = value(compiledNestedRuntime.createSignal(false), "compiled nested inner selector creation");
+        let compiledNestedSetupCount = 0;
+        const CompiledNested = domModule.defineComponent("CompiledNested", () => {
+          compiledNestedSetupCount += 1;
+          return success(compiledNestedInner.createView({ selector: compiledNestedInnerSignal }));
+        });
+        const compiledNestedContainer = document.createElement("main");
+        document.body.appendChild(compiledNestedContainer);
+        const compiledNestedRoot = value(domModule.createRoot(compiledNestedContainer, compiledNestedRuntime), "compiled nested root creation");
+        const compiledNestedView = compiledNestedOuter.createView({ selector: compiledNestedOuterSignal, Nested: CompiledNested });
+        check(compiledNestedView.version === 3, "compiler preserves outer nested conditional version 3");
+        value(compiledNestedRoot.mount(compiledNestedView), "compiled nested conditional mount", compiledNestedRoot);
+        check(compiledNestedContainer.textContent === "off" && compiledNestedSetupCount === 0, "compiled nested inactive branch is lazy");
+        value(compiledNestedRuntime.set(compiledNestedOuterSignal, true), "compiled nested outer selector write");
+        value(compiledNestedRoot.flush(), "compiled nested outer selector flush", compiledNestedRoot);
+        check(compiledNestedContainer.textContent === "off" && compiledNestedSetupCount === 1, "compiled nested component setup executes once");
+        value(compiledNestedRuntime.set(compiledNestedInnerSignal, true), "compiled nested inner selector write");
+        value(compiledNestedRoot.flush(), "compiled nested inner selector flush", compiledNestedRoot);
+        check(compiledNestedContainer.textContent === "on" && compiledNestedSetupCount === 1, "compiled nested r0 updates without parent setup");
+        value(compiledNestedRoot.dispose(), "compiled nested root disposal", compiledNestedRoot);
+        value(compiledNestedRuntime.dispose(), "compiled nested runtime disposal");
+        document.body.removeChild(compiledNestedContainer);
+
         const interferenceRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "interference runtime initializes");
         const interferenceSignal = value(interferenceRuntime.createSignal(false), "interference signal creation");
         const interferenceContainer = document.createElement("main");
@@ -343,6 +370,333 @@ function browserPage() {
         expectError(interferenceCleanup, "root_cleanup_failed", "detached anchor cleanup remains fail-closed", interferenceRoot);
         value(interferenceRuntime.dispose(), "interference runtime disposal");
         document.body.removeChild(interferenceContainer);
+
+        function commentNodes(container) {
+          const result = [];
+          const visit = (node) => {
+            for (const child of node.childNodes) {
+              if (child.nodeType === Node.COMMENT_NODE) result.push(child);
+              visit(child);
+            }
+          };
+          visit(container);
+          return result;
+        }
+
+        const scopedRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "scoped runtime initializes");
+        const outerSelector = value(scopedRuntime.createSignal(false), "scoped outer selector creation");
+        const nestedSelector = value(scopedRuntime.createSignal(false), "scoped nested selector creation");
+        const scopedCounts = { app: 0, nested: 0, falseFactory: 0, trueFactory: 0 };
+        const NestedSameId = domModule.defineComponent("NestedSameId", () => {
+          scopedCounts.nested += 1;
+          return success({
+            nodes: [{ id: "nested-host", kind: "element", name: "section" }],
+            bindings: [], listeners: [], components: [],
+            conditions: [{
+              kind: "conditional", id: "r0", parentId: "nested-host", order: 0,
+              dependencies: [nestedSelector],
+              evaluate: ({ runtime: current }) => current.get(nestedSelector),
+              whenTrue: () => { scopedCounts.trueFactory += 1; return success(textBranch("nested-on", "nested on")); },
+              whenFalse: () => { scopedCounts.falseFactory += 1; return success(textBranch("nested-off", "nested off")); },
+            }],
+          });
+        });
+        const ScopedIdentityApp = domModule.defineComponent("ScopedIdentityApp", () => {
+          scopedCounts.app += 1;
+          return success({
+            nodes: [{ id: "app-host", kind: "element", name: "main" }],
+            bindings: [], listeners: [], components: [],
+            conditions: [{
+              kind: "conditional", id: "r0", parentId: "app-host", order: 0,
+              dependencies: [outerSelector],
+              evaluate: ({ runtime: current }) => current.get(outerSelector),
+              whenTrue: () => success({
+                nodes: [], bindings: [], listeners: [],
+                components: [{ kind: "component", id: "nested-component", order: 0, component: NestedSameId, props: {} }],
+              }),
+              whenFalse: () => success(textBranch("scoped-off", "outer off")),
+            }],
+          });
+        });
+        const scopedContainer = document.createElement("main");
+        document.body.appendChild(scopedContainer);
+        const scopedRoot = value(domModule.createRoot(scopedContainer, scopedRuntime), "scoped root creation");
+        value(scopedRoot.mount({
+          protocol: "ruseact.template", version: 2, templateId: "m4.4.5-scoped-conditional",
+          instantiate: () => ({
+            nodes: [], bindings: [], listeners: [],
+            components: [{ kind: "component", id: "app", order: 0, component: ScopedIdentityApp, props: {} }],
+          }),
+        }), "nested r0 initial mount", scopedRoot);
+        check(scopedCounts.app === 1 && scopedCounts.nested === 0, "nested r0 is lazy before outer activation");
+        const scopedOuterAnchors = commentNodes(scopedContainer);
+        check(scopedOuterAnchors.length === 2 && scopedContainer.textContent === "outer off", "nested r0 initial false branch");
+        value(scopedRuntime.set(outerSelector, true), "nested r0 outer selector write");
+        value(scopedRoot.flush(), "nested r0 outer selector flush", scopedRoot);
+        check(scopedCounts.app === 1 && scopedCounts.nested === 1 && scopedCounts.falseFactory === 1, "nested r0 mounts its child scope once");
+        const activeScopedAnchors = commentNodes(scopedContainer);
+        check(activeScopedAnchors.length === 4 && activeScopedAnchors[0] === scopedOuterAnchors[0] && activeScopedAnchors[3] === scopedOuterAnchors[1], "nested r0 keeps outer anchors stable");
+        value(scopedRuntime.set(nestedSelector, true), "nested r0 inner selector write");
+        value(scopedRoot.flush(), "nested r0 inner selector flush", scopedRoot);
+        check(scopedCounts.app === 1 && scopedCounts.nested === 1 && scopedCounts.trueFactory === 1, "nested r0 updates without rerunning parent setup");
+        check(commentNodes(scopedContainer)[0] === scopedOuterAnchors[0] && commentNodes(scopedContainer)[3] === scopedOuterAnchors[1], "nested r0 inner update preserves outer anchors");
+        value(scopedRuntime.set(outerSelector, false), "nested r0 outer removal write");
+        value(scopedRoot.flush(), "nested r0 outer removal flush", scopedRoot);
+        check(scopedContainer.textContent === "outer off" && commentNodes(scopedContainer).length === 2, "nested r0 removal cleans descendant region");
+        value(scopedRuntime.set(outerSelector, true), "nested r0 outer recreation write");
+        value(scopedRoot.flush(), "nested r0 outer recreation flush", scopedRoot);
+        check(scopedCounts.nested === 2 && scopedCounts.trueFactory === 2, "nested r0 recreation receives a fresh lifetime");
+        value(scopedRoot.dispose(), "nested r0 root disposal", scopedRoot);
+        value(scopedRuntime.dispose(), "nested r0 runtime disposal");
+        document.body.removeChild(scopedContainer);
+
+        const repeatedRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "repeated-scope runtime initializes");
+        const repeatedFirst = value(repeatedRuntime.createSignal(false), "repeated first selector creation");
+        const repeatedSecond = value(repeatedRuntime.createSignal(false), "repeated second selector creation");
+        let repeatedSetupCount = 0;
+        const RepeatedSameId = domModule.defineComponent("RepeatedSameId", (props) => {
+          repeatedSetupCount += 1;
+          const selector = props.selector;
+          return success({
+            nodes: [], bindings: [], listeners: [], components: [],
+            conditions: [{
+              kind: "conditional", id: "r0", order: 0, dependencies: [selector],
+              evaluate: ({ runtime: current }) => current.get(selector),
+              whenTrue: () => success(textBranch("repeat-on", "instance on")),
+              whenFalse: () => success(textBranch("repeat-off", "instance off")),
+            }],
+          });
+        });
+        const repeatedContainer = document.createElement("main");
+        document.body.appendChild(repeatedContainer);
+        const repeatedRoot = value(domModule.createRoot(repeatedContainer, repeatedRuntime), "repeated-scope root creation");
+        value(repeatedRoot.mount({
+          protocol: "ruseact.template", version: 2, templateId: "m4.4.5-repeated-conditional",
+          instantiate: () => ({
+            nodes: [{ id: "repeated-host", kind: "element", name: "section" }],
+            bindings: [], listeners: [],
+            components: [
+              { kind: "component", id: "first", parentId: "repeated-host", order: 0, component: RepeatedSameId, props: { selector: repeatedFirst } },
+              { kind: "component", id: "second", parentId: "repeated-host", order: 1, component: RepeatedSameId, props: { selector: repeatedSecond } },
+            ],
+          }),
+        }), "repeated r0 initial mount", repeatedRoot);
+        check(repeatedSetupCount === 2 && repeatedContainer.querySelectorAll("p").length === 2, "component instances independently own repeated r0 regions");
+        value(repeatedRuntime.set(repeatedFirst, true), "first repeated selector write");
+        value(repeatedRoot.flush(), "first repeated selector flush", repeatedRoot);
+        check(repeatedSetupCount === 2 && repeatedContainer.textContent === "instance oninstance off", "one repeated r0 region updates independently");
+        value(repeatedRuntime.set(repeatedSecond, true), "second repeated selector write");
+        value(repeatedRoot.flush(), "second repeated selector flush", repeatedRoot);
+        check(repeatedSetupCount === 2 && repeatedContainer.textContent === "instance oninstance on", "the other repeated r0 region remains independent");
+        value(repeatedRoot.dispose(), "repeated r0 root disposal", repeatedRoot);
+        value(repeatedRuntime.dispose(), "repeated r0 runtime disposal");
+        document.body.removeChild(repeatedContainer);
+
+        const scopedSnapshotRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "scoped snapshot runtime initializes");
+        const snapshotOuterSelector = value(scopedSnapshotRuntime.createSignal(true), "scoped snapshot outer selector creation");
+        const snapshotNestedSelector = value(scopedSnapshotRuntime.createSignal(true), "scoped snapshot nested selector creation");
+        const snapshotSiblingSelector = value(scopedSnapshotRuntime.createSignal(false), "scoped snapshot sibling selector creation");
+        const SnapshotNested = domModule.defineComponent("SnapshotNested", () => success({
+          nodes: [], bindings: [], listeners: [], components: [],
+          conditions: [{
+            kind: "conditional", id: "r0", order: 0, dependencies: [snapshotNestedSelector],
+            evaluate: ({ runtime: current }) => current.get(snapshotNestedSelector),
+            whenTrue: () => success(textBranch("snapshot-nested-on", "nested live")),
+            whenFalse: () => success(textBranch("snapshot-nested-off", "nested off")),
+          }],
+        }));
+        const SnapshotOuter = domModule.defineComponent("SnapshotOuter", () => success({
+          nodes: [], bindings: [], listeners: [], components: [],
+          conditions: [{
+            kind: "conditional", id: "r0", order: 0, dependencies: [snapshotOuterSelector],
+            evaluate: ({ runtime: current }) => current.get(snapshotOuterSelector),
+            whenTrue: () => success({ nodes: [], bindings: [], listeners: [], components: [{ kind: "component", id: "nested", order: 0, component: SnapshotNested, props: {} }] }),
+            whenFalse: () => success(emptyPlan()),
+          }],
+        }));
+        const SnapshotSibling = domModule.defineComponent("SnapshotSibling", () => success({
+          nodes: [], bindings: [], listeners: [], components: [],
+          conditions: [{
+            kind: "conditional", id: "r0", order: 0, dependencies: [snapshotSiblingSelector],
+            evaluate: ({ runtime: current }) => current.get(snapshotSiblingSelector),
+            whenTrue: () => success(textBranch("snapshot-sibling-on", "sibling live")),
+            whenFalse: () => success(textBranch("snapshot-sibling-off", "sibling off")),
+          }],
+        }));
+        const scopedSnapshotContainer = document.createElement("main");
+        document.body.appendChild(scopedSnapshotContainer);
+        const scopedSnapshotRoot = value(domModule.createRoot(scopedSnapshotContainer, scopedSnapshotRuntime), "scoped snapshot root creation");
+        value(scopedSnapshotRoot.mount({
+          protocol: "ruseact.template", version: 2, templateId: "m4.4.5-scoped-snapshot",
+          instantiate: () => ({
+            nodes: [], bindings: [], listeners: [],
+            components: [
+              { kind: "component", id: "outer", order: 0, component: SnapshotOuter, props: {} },
+              { kind: "component", id: "sibling", order: 1, component: SnapshotSibling, props: {} },
+            ],
+          }),
+        }), "scoped snapshot initial mount", scopedSnapshotRoot);
+        value(scopedSnapshotRuntime.set(snapshotOuterSelector, false), "scoped snapshot outer write");
+        value(scopedSnapshotRuntime.set(snapshotNestedSelector, false), "scoped snapshot nested write");
+        value(scopedSnapshotRuntime.set(snapshotSiblingSelector, true), "scoped snapshot sibling write");
+        const scopedSnapshotReport = value(scopedSnapshotRoot.flush(), "scoped same-snapshot flush", scopedSnapshotRoot);
+        check(scopedSnapshotReport.drainedCount === 3 && scopedSnapshotReport.executedCount === 2 && scopedSnapshotReport.skippedCount === 1, "same-snapshot skip is scoped to the exact disposed r0 computation");
+        check(scopedSnapshotContainer.textContent === "sibling live", "same-snapshot unrelated r0 computation remains live");
+        value(scopedSnapshotRoot.dispose(), "scoped snapshot root disposal", scopedSnapshotRoot);
+        value(scopedSnapshotRuntime.dispose(), "scoped snapshot runtime disposal");
+        document.body.removeChild(scopedSnapshotContainer);
+
+        const mixedRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "mixed structural runtime initializes");
+        const mixedRevision = value(mixedRuntime.createSignal(0), "mixed revision creation");
+        const itemASelector = value(mixedRuntime.createSignal(false), "mixed item A selector creation");
+        const itemBSelector = value(mixedRuntime.createSignal(false), "mixed item B selector creation");
+        const nestedRevision = value(mixedRuntime.createSignal(0), "nested list revision creation");
+        const mixedItems = { value: [{ key: "a", label: "A" }, { key: "b", label: "B" }] };
+        const MixedItemComponent = domModule.defineComponent("MixedItemComponent", (props) => {
+          const selector = props.selector;
+          return success({
+            nodes: [], bindings: [], listeners: [], components: [],
+            conditions: [{
+              kind: "conditional", id: "r0", order: 0, dependencies: [selector],
+              evaluate: ({ runtime: current }) => current.get(selector),
+              whenTrue: () => success(textBranch("mixed-on", "active")),
+              whenFalse: () => success(textBranch("mixed-off", "inactive")),
+            }],
+          });
+        });
+        const mixedItemPlan = (environment) => {
+          const selector = environment.key === "a" ? itemASelector : itemBSelector;
+          return success({
+            nodes: [{ id: "item-host", kind: "element", name: "article" }],
+            bindings: [], listeners: [], conditions: [],
+            components: [{ kind: "component", id: "condition-component", parentId: "item-host", order: 0, component: MixedItemComponent, props: { selector } }],
+            keyedLists: [{
+              kind: "keyed", id: "r0", parentId: "item-host", order: 1, dependencies: [nestedRevision],
+              evaluate: () => success([{ key: "nested", fields: { label: environment.key } }]),
+              createItem: () => success({ nodes: [{ id: "nested-label", kind: "text", text: "nested" }], bindings: [], listeners: [] }),
+            }],
+          });
+        };
+        const mixedContainer = document.createElement("main");
+        document.body.appendChild(mixedContainer);
+        const mixedRoot = value(domModule.createRoot(mixedContainer, mixedRuntime), "mixed structural root creation");
+        value(mixedRoot.mount({
+          protocol: "ruseact.template", version: 4, templateId: "m4.4.5-mixed-structural",
+          instantiate: () => ({
+            nodes: [{ id: "list-host", kind: "element", name: "section" }],
+            bindings: [], listeners: [], components: [], conditions: [],
+            keyedLists: [{
+              kind: "keyed", id: "r0", parentId: "list-host", order: 0, dependencies: [mixedRevision],
+              evaluate: () => success(mixedItems.value.map((item) => ({ key: item.key, fields: { label: item.label } }))),
+              createItem: mixedItemPlan,
+            }],
+          }),
+        }), "mixed structural initial mount", mixedRoot);
+        check(mixedContainer.querySelectorAll("article").length === 2 && mixedContainer.textContent === "inactivenestedinactivenested", "conditional and nested keyed r0 scopes mount independently (got " + mixedContainer.textContent + ")");
+        const mixedArticles = Array.from(mixedContainer.querySelectorAll("article"));
+        value(mixedRuntime.set(itemASelector, true), "mixed item A selector write");
+        value(mixedRoot.flush(), "mixed item A selector flush", mixedRoot);
+        check(mixedContainer.textContent === "activenestedinactivenested", "conditional inside keyed item updates independently");
+        mixedItems.value = [{ key: "b", label: "B" }, { key: "a", label: "A" }];
+        value(mixedRuntime.set(mixedRevision, 1), "mixed reorder revision write");
+        value(mixedRoot.flush(), "mixed reorder flush", mixedRoot);
+        const reorderedArticles = Array.from(mixedContainer.querySelectorAll("article"));
+        check(reorderedArticles[0] === mixedArticles[1] && reorderedArticles[1] === mixedArticles[0], "nested structural resources move with retained keyed owners");
+        mixedItems.value = [{ key: "a", label: "A" }];
+        value(mixedRuntime.set(mixedRevision, 2), "mixed removal revision write");
+        value(mixedRoot.flush(), "mixed removal flush", mixedRoot);
+        check(mixedContainer.querySelectorAll("article").length === 1 && mixedContainer.textContent === "activenested", "removing one keyed scope preserves the other");
+        value(mixedRoot.dispose(), "mixed structural root disposal", mixedRoot);
+
+        const branchListSelector = value(mixedRuntime.createSignal(false), "branch list selector creation");
+        const branchListRevision = value(mixedRuntime.createSignal(0), "branch list revision creation");
+        const branchListContainer = document.createElement("main");
+        document.body.appendChild(branchListContainer);
+        const branchListRoot = value(domModule.createRoot(branchListContainer, mixedRuntime), "branch list root creation");
+        value(branchListRoot.mount({
+          protocol: "ruseact.template", version: 3, templateId: "m4.4.5-keyed-inside-conditional",
+          instantiate: () => ({
+            nodes: [], bindings: [], listeners: [], components: [],
+            conditions: [{
+              kind: "conditional", id: "r0", order: 0, dependencies: [branchListSelector],
+              evaluate: ({ runtime: current }) => current.get(branchListSelector),
+              whenTrue: () => success({
+                nodes: [{ id: "branch-list-host", kind: "element", name: "section" }],
+                bindings: [], listeners: [], components: [], conditions: [],
+                keyedLists: [{
+                  kind: "keyed", id: "r0", parentId: "branch-list-host", order: 0,
+                  dependencies: [branchListRevision],
+                  evaluate: () => success([{ key: "branch", fields: {} }]),
+                  createItem: () => success({ nodes: [{ id: "branch-item", kind: "text", text: "branch item" }], bindings: [], listeners: [] }),
+                }],
+              }),
+              whenFalse: () => success(emptyPlan()),
+            }],
+          }),
+        }), "keyed inside conditional initial mount", branchListRoot);
+        check(branchListContainer.textContent === "", "keyed branch is lazy while conditional is inactive");
+        value(mixedRuntime.set(branchListSelector, true), "keyed inside conditional selector write");
+        value(branchListRoot.flush(), "keyed inside conditional activation flush", branchListRoot);
+        check(branchListContainer.textContent === "branch item", "keyed list mounts inside its conditional scope");
+        value(mixedRuntime.set(branchListSelector, false), "keyed inside conditional removal write");
+        value(branchListRoot.flush(), "keyed inside conditional removal flush", branchListRoot);
+        check(branchListContainer.textContent === "", "conditional removal cleans its keyed list descendants");
+        value(branchListRoot.dispose(), "keyed inside conditional root disposal", branchListRoot);
+        document.body.removeChild(branchListContainer);
+        value(mixedRuntime.dispose(), "mixed structural runtime disposal");
+        document.body.removeChild(mixedContainer);
+
+        const duplicateRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "duplicate identity runtime initializes");
+        const duplicateSignal = value(duplicateRuntime.createSignal(false), "duplicate identity signal creation");
+        const duplicateContainer = document.createElement("main");
+        document.body.appendChild(duplicateContainer);
+        const duplicateRoot = value(domModule.createRoot(duplicateContainer, duplicateRuntime), "duplicate identity root creation");
+        expectError(duplicateRoot.mount({
+          protocol: "ruseact.template", version: 3, templateId: "m4.4.5-duplicate-local-id",
+          instantiate: () => ({
+            nodes: [], bindings: [], listeners: [], components: [],
+            conditions: [
+              { kind: "conditional", id: "r0", order: 0, dependencies: [duplicateSignal], evaluate: ({ runtime: current }) => current.get(duplicateSignal), whenTrue: () => success(emptyPlan()), whenFalse: () => success(emptyPlan()) },
+              { kind: "conditional", id: "r0", order: 1, dependencies: [duplicateSignal], evaluate: ({ runtime: current }) => current.get(duplicateSignal), whenTrue: () => success(emptyPlan()), whenFalse: () => success(emptyPlan()) },
+            ],
+          }),
+        }), "duplicate_region_id", "duplicate local region IDs remain rejected", duplicateRoot);
+        value(duplicateRoot.dispose(), "duplicate identity root disposal", duplicateRoot);
+        value(duplicateRuntime.dispose(), "duplicate identity runtime disposal");
+        document.body.removeChild(duplicateContainer);
+
+        const { createBindingContext } = await import("./ruseact-dom/src/bindings.js");
+        const failedCleanupRuntime = value(await runtimeModule.createReactiveCore(() => wasm), "failed cleanup runtime initializes");
+        const failedCleanupSignal = value(failedCleanupRuntime.createSignal(false), "failed cleanup signal creation");
+        const failedCleanupContext = createBindingContext({ assertOwned() {} }, failedCleanupRuntime);
+        const failedCleanupScope = {};
+        const failedCleanupRegistration = failedCleanupContext.registerStructural({
+          scope: failedCleanupScope,
+          kind: "conditional",
+          key: "r0",
+          dependencies: [failedCleanupSignal],
+          update: () => success(undefined),
+        });
+        const failedCleanupStructural = value(failedCleanupRegistration, "failed cleanup structural registration");
+        const originalUnsubscribe = failedCleanupRuntime.unsubscribe;
+        failedCleanupRuntime.unsubscribe = () => failure("unsubscribe_failed", "unsubscribe_structural", "computation", "intentional cleanup failure");
+        expectError(failedCleanupContext.disposeStructural(failedCleanupStructural), "binding_cleanup_failed", "failed cleanup returns a structured error");
+        failedCleanupRuntime.unsubscribe = originalUnsubscribe;
+        expectError(failedCleanupContext.registerStructural({
+          scope: failedCleanupScope,
+          kind: "conditional",
+          key: "r0",
+          dependencies: [failedCleanupSignal],
+          update: () => success(undefined),
+        }), "duplicate_binding", "failed cleanup retains the scoped identity");
+        expectError(failedCleanupContext.registerStructural({
+          scope: failedCleanupScope,
+          kind: "keyed",
+          key: "r0",
+          dependencies: [failedCleanupSignal],
+          update: () => success(undefined),
+        }), "duplicate_binding", "scoped identity is shared across structural kinds");
+        value(failedCleanupRuntime.dispose(), "failed cleanup runtime disposal");
 
         value(runtime.dispose(), "application runtime disposal");
         document.body.removeChild(container);
@@ -374,6 +728,19 @@ try {
 }`, { fileName: "conditional-browser.tsx" });
   if (!compiled.ok) throw new Error(`conditional compiler fixture failed: ${JSON.stringify(compiled.diagnostics)}`);
   writeFileSync(path.join(temporaryRoot, "compiled_conditional.js"), compiled.code);
+  const compiledNestedOuter = compiler.compileTsxModule(`export function createView({ selector, Nested }) {
+  return <div>{ruseact.conditional([selector], ({ runtime }) => runtime.get(selector), () => <Nested />, () => <p>off</p>)}</div>;
+}`, { fileName: "nested-outer.tsx" });
+  if (!compiledNestedOuter.ok) throw new Error(`nested outer compiler fixture failed: ${JSON.stringify(compiledNestedOuter.diagnostics)}`);
+  const compiledNestedInner = compiler.compileTsxModule(`export function createView({ selector }) {
+  return <section>{ruseact.conditional([selector], ({ runtime }) => runtime.get(selector), () => <b>on</b>, () => <i>off</i>)}</section>;
+}`, { fileName: "nested-inner.tsx" });
+  if (!compiledNestedInner.ok) throw new Error(`nested inner compiler fixture failed: ${JSON.stringify(compiledNestedInner.diagnostics)}`);
+  if (compiledNestedOuter.metadata.slots.find((slot) => slot.kind === "conditional")?.id !== "r0" || compiledNestedInner.metadata.slots.find((slot) => slot.kind === "conditional")?.id !== "r0") {
+    throw new Error("nested compiler fixtures must preserve independent local r0 IDs");
+  }
+  writeFileSync(path.join(temporaryRoot, "compiled_nested_outer.js"), compiledNestedOuter.code);
+  writeFileSync(path.join(temporaryRoot, "compiled_nested_inner.js"), compiledNestedInner.code);
   execFileSync(process.execPath, [
     path.join(repositoryRoot, "scripts", "compile_browser_sources.mjs"), temporaryRoot,
   ], { cwd: repositoryRoot, stdio: "inherit" });

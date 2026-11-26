@@ -61,6 +61,7 @@ API compatibility is claimed.
 | M4.4.2 — Function components and nested ownership | Complete; hosted Chromium verification passed |
 | M4.4.3 — Conditional structural regions | Complete; hosted Chromium verification passed |
 | M4.4.4 — Keyed lists and stable DOM identity | Complete; hosted Chromium and benchmark verification passed |
+| M4.4.5 — Owner-scoped structural identity hardening | Implemented on the fix branch; promotion pending |
 | M4.5.1 — Experimental package distribution | Tarball pipeline and isolated consumer verification implemented; PR review pending |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
@@ -146,6 +147,15 @@ The Rust reactive core supports:
   syntax. Component setup is supplied separately through `defineComponent`;
   the compiler does not add a component rerender engine or structural
   reconciliation.
+
+- The M4.4.5 fix branch scopes conditional and keyed structural registration
+  by the exact private owner object and local region ID, while retaining the
+  structural kind in each record. Template-local IDs may therefore repeat
+  across component and branch scopes without colliding, while duplicate IDs
+  within one valid scope remain rejected. The
+  existing Rust pending queue, computation identities, renderer protocols,
+  and manual flush boundary are unchanged. A new matching distribution is
+  required before the separate consumer can use this correction.
 
 - An M4.4.1 design for component identity, hierarchical resource ownership,
   anchored conditional regions, keyed-only list identity, and their compiler

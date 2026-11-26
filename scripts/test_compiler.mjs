@@ -156,6 +156,21 @@ try {
   assert.equal(conditionalRepeat.ok, true);
   assert.equal(conditionalRepeat.code, conditionalResult.code, "conditional output must be deterministic");
 
+  const nestedOuterSource = `export function createView({ selector, Nested }) {
+  return <div>{ruseact.conditional([selector], ({ runtime }) => runtime.get(selector), () => <Nested />, () => <p>off</p>)}</div>;
+}`;
+  const nestedInnerSource = `export function createView({ selector }) {
+  return <section>{ruseact.conditional([selector], ({ runtime }) => runtime.get(selector), () => <b>on</b>, () => <i>off</i>)}</section>;
+}`;
+  const nestedOuterResult = compiler.compileTsxModule(nestedOuterSource, { fileName: "nested-outer.tsx" });
+  const nestedInnerResult = compiler.compileTsxModule(nestedInnerSource, { fileName: "nested-inner.tsx" });
+  assert.equal(nestedOuterResult.ok, true, JSON.stringify(nestedOuterResult));
+  assert.equal(nestedInnerResult.ok, true, JSON.stringify(nestedInnerResult));
+  assert.equal(nestedOuterResult.metadata.slots.find((slot) => slot.kind === "conditional")?.id, "r0");
+  assert.equal(nestedInnerResult.metadata.slots.find((slot) => slot.kind === "conditional")?.id, "r0");
+  assert.match(nestedOuterResult.code, /version: 3/);
+  assert.match(nestedInnerResult.code, /version: 3/);
+
   const keyedSource = `export function createView({ revision, items }) {
   return <ul>{ruseact.keyed(
     [revision],

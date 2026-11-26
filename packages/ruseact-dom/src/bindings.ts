@@ -40,6 +40,10 @@ export interface BindingRegistration {
 }
 
 export interface StructuralRegistration {
+  /** Private owner identity; never exposed through the public renderer API. */
+  readonly scope: object;
+  /** Structural kinds share one identity namespace per owner and local ID. */
+  readonly kind: "conditional" | "keyed";
   readonly dependencies: readonly SignalHandle<SupportedScalar>[];
   readonly update: () => CoreResult<unknown>;
   readonly key?: string;
@@ -96,6 +100,8 @@ interface StructuralRecord {
   readonly kind: "structural";
   readonly structural: StructuralHandle;
   readonly computation: ComputationHandle;
+  readonly scope: object;
+  readonly structuralKind: StructuralRegistration["kind"];
   readonly dependencies: readonly SignalHandle<SupportedScalar>[];
   readonly key: string;
   readonly update: () => CoreResult<unknown>;
@@ -274,7 +280,7 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
   const recordsByBinding = new Map<BindingHandle, BindingRecord>();
   const recordsByStructural = new Map<StructuralHandle, StructuralRecord>();
   const keysByTarget = new Map<Node, Set<string>>();
-  const structuralKeys = new Set<string>();
+  const structuralKeysByScope = new WeakMap<object, Map<string, StructuralRecord>>();
   let flushSnapshot: readonly DispatchRecord[] | undefined;
   const disposedDuringFlush = new Set<ComputationHandle>();
 
@@ -300,6 +306,40 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     }
   }
 
+  function scopedStructuralKeys(
+    scope: object,
+    create: boolean,
+  ): Map<string, StructuralRecord> | undefined {
+    let keys = structuralKeysByScope.get(scope);
+    if (keys === undefined && create) {
+      keys = new Map();
+      structuralKeysByScope.set(scope, keys);
+    }
+    return keys;
+  }
+
+  function releaseStructuralKey(record: StructuralRecord): void {
+    const scopedKeys = scopedStructuralKeys(record.scope, false);
+    if (scopedKeys?.get(record.key) !== record) {
+      return;
+    }
+    scopedKeys.delete(record.key);
+    if (scopedKeys?.size === 0) {
+      structuralKeysByScope.delete(record.scope);
+    }
+  }
+
+  function releaseRecord(record: DispatchRecord): void {
+    recordsByComputation.delete(record.computation);
+    if (record.kind === "binding") {
+      recordsByBinding.delete(record.binding);
+      freeKey(record);
+    } else {
+      recordsByStructural.delete(record.structural);
+      releaseStructuralKey(record);
+    }
+  }
+
   function cleanupRecord(record: DispatchRecord): CoreResult<void> {
     if (!record.live) {
       return record.cleanupFailed
@@ -307,14 +347,6 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
         : success(undefined);
     }
     record.live = false;
-    recordsByComputation.delete(record.computation);
-    if (record.kind === "binding") {
-      recordsByBinding.delete(record.binding);
-      freeKey(record);
-    } else {
-      recordsByStructural.delete(record.structural);
-      structuralKeys.delete(record.key);
-    }
 
     let firstError: CoreError | undefined;
     for (const dependency of record.dependencies) {
@@ -334,6 +366,7 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
       firstError = disposedComputation.error;
     }
     if (firstError === undefined) {
+      releaseRecord(record);
       if (flushSnapshot?.includes(record) === true) {
         disposedDuringFlush.add(record.computation);
       }
@@ -476,7 +509,9 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     if (
       !isObject(registration) ||
       typeof registration.update !== "function" ||
-      !Array.isArray(registration.dependencies)
+      !Array.isArray(registration.dependencies) ||
+      !isObject(registration.scope) ||
+      (registration.kind !== "conditional" && registration.kind !== "keyed")
     ) {
       return contextFailure("invalid_binding", "register_structural", "structural registration is malformed");
     }
@@ -484,7 +519,8 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
     if (typeof key !== "string" || key.length === 0) {
       return contextFailure("invalid_binding", "register_structural", "structural key must be non-empty");
     }
-    if (structuralKeys.has(key)) {
+    const scopedKeys = scopedStructuralKeys(registration.scope, true)!;
+    if (scopedKeys.has(key)) {
       return contextFailure("duplicate_binding", "register_structural", `structural key ${key} is already registered`);
     }
 
@@ -515,13 +551,15 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
       kind: "structural",
       structural,
       computation: computation.value,
+      scope: registration.scope,
+      structuralKind: registration.kind,
       dependencies,
       key,
       update: registration.update,
       live: true,
       cleanupFailed: false,
     };
-    structuralKeys.add(key);
+    scopedKeys.set(key, record);
     recordsByComputation.set(record.computation, record);
     recordsByStructural.set(structural, record);
     const initial = execute(record);
@@ -656,7 +694,6 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
       return contextFailure("context_busy", "dispose_binding_context", "binding context cannot be disposed during flush");
     }
     disposed = true;
-    ACTIVE_RUNTIME_CONTEXTS.delete(runtimeObject);
     let firstError: CoreError | undefined;
     for (const record of Array.from(new Set<DispatchRecord>([
       ...recordsByBinding.values(),
@@ -667,12 +704,15 @@ export function createBindingContext(host: HostContext, runtime: ReactiveCore): 
         firstError = cleaned.error;
       }
     }
+    if (firstError !== undefined) {
+      return failure(firstError);
+    }
+    ACTIVE_RUNTIME_CONTEXTS.delete(runtimeObject);
     recordsByComputation.clear();
     recordsByBinding.clear();
     recordsByStructural.clear();
     keysByTarget.clear();
-    structuralKeys.clear();
-    return firstError === undefined ? success(undefined) : failure(firstError);
+    return success(undefined);
   }
 
   context = { registerBinding, disposeBinding, registerStructural, disposeStructural, flush, dispose };

@@ -6,6 +6,11 @@ import {
   measureCase,
   timerSafetyTargetNs,
 } from "./benchmark_workloads.mjs";
+import {
+  nativeAttributePropertyCycles,
+  nativeLifecycleOperations,
+  ruseactSharedSignalCycles,
+} from "./dom_benchmark_workloads.mjs";
 
 function quantizedClock({
   quantumNs = 1_000_000,
@@ -127,6 +132,12 @@ assert.equal(
   4,
   "dispersion bound is expressed in timer quanta",
 );
+assert.equal(ruseactSharedSignalCycles(1), 32, "size-1 fanout has a bounded duration floor");
+assert.equal(ruseactSharedSignalCycles(10), 16, "larger fanout sizes retain the established cycle count");
+assert.equal(nativeAttributePropertyCycles(10), 32, "size-10 native attribute/property has a bounded duration floor");
+assert.equal(nativeAttributePropertyCycles(100), 16, "larger native attribute/property sizes retain the established cycle count");
+assert.equal(nativeLifecycleOperations(100), 4, "size-100 native lifecycle has a bounded duration floor");
+assert.equal(nativeLifecycleOperations(1000), 1, "size-1000 native lifecycle retains one complete operation");
 
 const quantized = await runCase(quantizedClock({ quantumNs: 100_000, operationNs: 70_000 }));
 assert.equal(quantized.recalibration_count, 0, "calibration handles quantized warmup samples");
@@ -219,4 +230,4 @@ assert.deepEqual(
   "deterministic clock inputs produce reproducible calibration results",
 );
 
-console.log("M2.5 calibration regression tests passed");
+console.log("M2.5/M3.5 calibration regression tests passed");

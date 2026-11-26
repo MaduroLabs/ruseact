@@ -2,9 +2,9 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.5.1-package-distribution`
+- Branch: `feature/m4.5.1.1-alpha1-distribution`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `1d222039f6e487cbfa137d65236ada15a93f42d2`
+- Baseline: `origin/develop` at `3ea3de8f01b2ae7001cf65e5576bcc9046401ce9`
 - Last verified on: Linux x86_64, 2026-11-25 for M4.5.1 package
   distribution;
   M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
@@ -217,7 +217,7 @@
   M4.4.2 component subset; M4.4.3 conditional decisions are now approved.
 - [x] Verified active required checks, squash-only rulesets, and disabled native auto-merge.
 - [x] Reviewed and merged the manual-approval workflow configuration PR; its protected rulesets remain active.
-- [ ] Add consumer applications in `ruseact-examples` in a later consumer
+- [ ] Add consumer applications in `ruseact-example` in a later consumer
   milestone; M4.5.1 keeps that repository out of scope.
 
 - [x] Implement M4.4.3 private comment anchors, version-3 conditional plans,
@@ -245,10 +245,10 @@
 - [x] Add isolated consumer verification outside the workspace covering
   installed declarations, Node runtime/compiler smoke tests, runtime-only
   package separation, and real Chromium protocol 1–4 fixtures.
-- [ ] Complete hosted CI distribution verification and leave the M4.5.1 PR
-  open for human review; npm publication and M4.5.2 remain deferred.
+- [x] Completed hosted CI distribution verification for the original alpha.0
+  package PR; npm publication and M4.5.2 remained deferred.
 
-### M4.5.1 package distribution verification
+### Historical M4.5.1 alpha.0 package distribution verification
 
 - `corepack pnpm install --frozen-lockfile` — PASS with approved execution
   access; the unprivileged InstaBox process cannot open pnpm's store operation
@@ -439,7 +439,7 @@
 ## Blockers / decisions
 
 - M0 intentionally has no runtime API, compiler, DOM renderer, or complex scheduler.
-- No files are added to the separate `ruseact-examples` repository.
+- No files are added to the separate `ruseact-example` repository.
 - The committed `.nvmrc` and CI configuration pin Node `24.22.3` for reproducible CI.
 - M1.4 exposes batch boundaries only; it does not execute computations or define scheduling priority, compiler tracking, DOM behavior, or a WASM ABI.
 - M1.5 found no correctness defect in the established M1.1–M1.4 APIs. The benchmark records Rust-native microbehavior only; dependency replacement and disposal retain `Vec`-scan complexity and were not speculatively optimized.
@@ -588,3 +588,34 @@ artifacts must not be replaced by this framework branch. After merge and
 promotion, rebuild and publish a new matching experimental distribution,
 preferably `0.1.0-alpha.1`, before resuming the consumer Conditional
 Playground.
+
+## M4.5.1.1 alpha.1 distribution refresh
+
+- [x] Verified PRs #62, #64, #65, and #66 and confirmed PR #63 closed without
+  merging. The current `origin/develop` contains M4.4.5 structural identity
+  hardening and M3.5.1 benchmark calibration hardening; current `origin/main`
+  contains the promoted changes.
+- [x] Preserved the dirty consumer worktree and did not modify its vendored
+  `0.1.0-alpha.0` artifacts.
+- [x] Synchronized all three package manifests to private version
+  `0.1.0-alpha.1` and updated the exact DOM workspace dependency and lockfile
+  specifier.
+- [x] Centralized active package/version resolution in
+  `scripts/distribution_metadata.mjs`; added strict version, filename, packed
+  dependency, and private-package regression coverage.
+- [x] Added the existing repository MIT `LICENSE` and copyright notice to all
+  staged package artifacts and validated exact license contents in each
+  tarball.
+- [x] Built, packed, and validated the development alpha.1 set. The generated
+  tarballs were 78,819, 76,434, and 22,832 bytes for runtime, DOM, and
+  compiler respectively; checksums are recorded in the distribution design
+  document and manifest.
+- [x] Installed-package verification passed with real WASM, declaration
+  checks, runtime/compiler smoke tests, all 53 Chromium checks including the
+  duplicate-local-ID nested conditional regression, and the runtime-only
+  consumer.
+
+The alpha.1 files above are dirty feature-branch development artifacts, not
+the final promoted-main consumer handoff. After review, merge, and promotion,
+rebuild the matching set from clean main, validate its manifest and checksums,
+and only then update `MaduroLabs/ruseact-example`.

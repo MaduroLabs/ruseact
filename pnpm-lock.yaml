@@ -181,7 +181,7 @@ importers:
   packages/ruseact-dom:
     dependencies:
       ruseact:
-        specifier: workspace:0.1.0-alpha.0
+        specifier: workspace:0.1.0-alpha.1
         version: link:../ruseact
 
 packages:

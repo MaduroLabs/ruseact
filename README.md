@@ -27,8 +27,8 @@ Ruseact explores a different separation of responsibilities:
   M3.4 root lifecycle, the approved M4.2 public renderer MVP, the narrow M4.3
   JSX/TSX compiler MVP, the approved M4.4.2 one-shot component subset, the
   approved M4.4.3 conditional-region subset, and the M4.4.4 keyed-list
-  implementation are present. M4.5.1 adds an installable experimental
-  tarball pipeline without publishing packages.
+  implementation are present. M4.5.1 and the M4.5.1.1 alpha.1 refresh add an
+  installable experimental tarball pipeline without publishing packages.
 
 The project is an architectural experiment. No performance advantage or React
 API compatibility is claimed.
@@ -54,7 +54,7 @@ API compatibility is claimed.
 | M3.3 — Reactive DOM bindings | Internal explicit binding prototype complete; no public renderer API |
 | M3.4 — Root mount and lifecycle | Internal root lifecycle prototype complete; no public renderer API |
 | M3.5 — End-to-end DOM integration and benchmark | Complete; hosted Chromium correctness and benchmark integrity passed |
-| M3.5.1 — DOM benchmark calibration hardening | Implemented on the fix branch; hosted verification pending |
+| M3.5.1 — DOM benchmark calibration hardening | Complete; hosted calibration verification passed |
 | M4.1 — Public renderer and compiler contract design | Complete; M4.2 subset approved |
 | M4.2 — Public renderer MVP | Complete; hosted Chromium verification passed |
 | M4.3 — JSX/TSX compiler MVP | Complete; hosted Chromium verification passed |
@@ -62,8 +62,8 @@ API compatibility is claimed.
 | M4.4.2 — Function components and nested ownership | Complete; hosted Chromium verification passed |
 | M4.4.3 — Conditional structural regions | Complete; hosted Chromium verification passed |
 | M4.4.4 — Keyed lists and stable DOM identity | Complete; hosted Chromium and benchmark verification passed |
-| M4.4.5 — Owner-scoped structural identity hardening | Implemented on the fix branch; promotion pending |
-| M4.5.1 — Experimental package distribution | Tarball pipeline and isolated consumer verification implemented; PR review pending |
+| M4.4.5 — Owner-scoped structural identity hardening | Complete; promoted to main |
+| M4.5.1.1 — Alpha.1 distribution refresh | Implemented on the feature branch; PR review pending |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
@@ -226,7 +226,7 @@ Example applications are maintained in a separate repository.
 The planned DOM renderer design and M3.2 implementation handoff are recorded
 in [docs/dom-renderer-design.md](docs/dom-renderer-design.md). Example
 applications, including a future Counter consumer, remain in the separate
-`ruseact-examples` repository and are not added here.
+`ruseact-example` repository and are not added here.
 
 ## M3.2 internal DOM host operations
 
@@ -480,10 +480,10 @@ authoritative when InstaBox cannot bind its temporary loopback server.
 The focused contract is documented in
 [docs/m4.4.3-conditional-regions.md](docs/m4.4.3-conditional-regions.md).
 
-## M4.5.1 experimental package distribution
+## M4.5.1.1 alpha.1 package distribution refresh
 
-M4.5.1 produces matching private tarballs for the existing three package
-boundaries at version `0.1.0-alpha.0`. The artifacts are ESM packages with
+M4.5.1.1 produces matching private tarballs for the existing three package
+boundaries at version `0.1.0-alpha.1`. The artifacts are ESM packages with
 declarations and source maps; `ruseact` also contains the release WASM binary
 and matching Node/web `wasm-bindgen` loaders. No npm publication, tag, or
 GitHub Release is performed.
@@ -494,6 +494,7 @@ Build and verify the local artifact set with:
 corepack pnpm install --frozen-lockfile
 corepack pnpm build:distribution
 corepack pnpm pack:packages
+corepack pnpm test:distribution:version
 corepack pnpm validate:distribution
 corepack pnpm test:packages
 ```
@@ -521,6 +522,11 @@ if (!result.ok) throw new Error(result.error.code);
 The supported package entry points, Node loading path, artifact manifest, and
 isolation rules are documented in
 [docs/m4.5-package-distribution.md](docs/m4.5-package-distribution.md).
+
+The prior `0.1.0-alpha.0` measurements and checksums remain historical
+records. Alpha.1 artifacts built on a dirty feature tree are development
+artifacts only; the consumer handoff must use a newly generated matching set
+from the verified promoted main revision.
 
 ## Development
 

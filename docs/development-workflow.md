@@ -2,7 +2,7 @@
 
 GitHub is the source of truth for tracked code, skills, architecture notes,
 workflow definitions, and committed lockfiles. The library and
-`ruseact-examples` repositories remain independent; this repository never adds
+`ruseact-example` repositories remain independent; this repository never adds
 example applications.
 
 ## Lifecycle
@@ -116,6 +116,6 @@ sources are affected. Record environment details for benchmark results.
 ## Example repo integration
 
 When public behavior changes, prepare the matching consumer change in the
-separate `ruseact-examples` repository and include its PR link in the library
+separate `ruseact-example` repository and include its PR link in the library
 PR. Before packages are published, test through tarballs built from known
 library commits; never commit sibling-path or absolute dependencies.

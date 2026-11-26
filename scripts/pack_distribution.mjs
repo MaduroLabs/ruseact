@@ -4,14 +4,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { packageArtifactFileName, readDistributionMetadata } from "./distribution_metadata.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distributionRoot = path.join(repositoryRoot, "target", "distribution");
 const packageBuildRoot = path.join(distributionRoot, "package-build");
 const artifactRoot = path.join(distributionRoot, "artifacts");
 const manifestPath = path.join(distributionRoot, "distribution-manifest.json");
-const packageVersion = "0.1.0-alpha.0";
-const packageNames = ["ruseact", "ruseact-dom", "ruseact-compiler"];
+const { packageNames, version: packageVersion } = readDistributionMetadata(repositoryRoot);
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -75,14 +75,14 @@ for (const name of packageNames) {
 }
 
 const packages = packageNames.map((name) => {
-  const fileName = `${name}-${packageVersion}.tgz`;
+  const fileName = packageArtifactFileName(name, packageVersion);
   const filePath = path.join(artifactRoot, fileName);
   if (!existsSync(filePath)) throw new Error(`missing packed artifact: ${fileName}`);
   const packageDirectory = path.join(packageBuildRoot, name);
   return {
     name,
     version: packageVersion,
-    file: path.relative(distributionRoot, filePath),
+    file: path.relative(distributionRoot, filePath).split(path.sep).join("/"),
     bytes: statSync(filePath).size,
     sha256: sha256(filePath),
     unpackedBytes: directoryBytes(packageDirectory),

@@ -34,7 +34,7 @@ surface requires an explicit semantic design and tests.
 
 ## Decision 4: Examples remain a separate repository
 
-Consumer applications belong in the sibling `ruseact-examples` repository.
+Consumer applications belong in the sibling `ruseact-example` repository.
 This repository contains no example applications and no sibling-path package
 dependencies. Consumer checks will use published or explicitly pinned tarballs
 once the packages have buildable output.
@@ -945,15 +945,16 @@ deferred.
 
 ## Decision 32: M4.5.1 distributes the existing three packages as private tarballs
 
-M4.5.1 adds package production and isolated-consumer verification without
-changing renderer semantics. The existing boundaries remain `ruseact` for the
+The original M4.5.1 alpha.0 milestone added package production and
+isolated-consumer verification without changing renderer semantics. The
+existing boundaries remain `ruseact` for the
 TypeScript runtime and packaged WASM, `ruseact-dom` for the public renderer,
 components, and structural plans, and `ruseact-compiler` for build-time TSX
 compilation. The dependency graph is `ruseact-dom -> ruseact` and
 `ruseact-compiler -> typescript`; runtime packages do not depend on the
 compiler.
 
-All three staged packages use private synchronized version `0.1.0-alpha.0`.
+The original staged packages used private synchronized version `0.1.0-alpha.0`.
 The source workspace keeps the DOM package's `workspace:0.1.0-alpha.0`
 relationship, while the packed manifest contains the exact runtime package
 version and no workspace protocol. Tarballs expose only explicit ESM package
@@ -1022,3 +1023,19 @@ same-snapshot disposal, and same-scope duplicate rejection. See
 [the M4.4.5 identity hardening record](m4.4.5-structural-identity.md). The
 consumer's existing `0.1.0-alpha.0` tarballs remain unchanged; a new matching
 artifact set, preferably `0.1.0-alpha.1`, is required after promotion.
+
+## Decision 34: M4.5.1.1 refreshes the synchronized alpha distribution
+
+The promoted M4.4.5 structural identity fix and M3.5.1 benchmark calibration
+hardening are distributed together as private `0.1.0-alpha.1` artifacts. The
+three source package manifests are the canonical version authority; the
+distribution scripts reject mismatched package versions, workspace
+dependencies that escape staging, incorrect artifact filenames, and packed
+metadata drift. Every staged package includes the repository MIT `LICENSE`
+notice. This refresh changes package distribution metadata only: template
+protocols 1–4, explicit WASM initialization, manual flushing, ownership, and
+public package boundaries remain unchanged.
+
+Alpha.1 artifacts generated on a dirty feature tree are development artifacts.
+The authoritative consumer handoff must rebuild from a verified clean
+promoted-main revision and record its own manifest, sizes, and checksums.

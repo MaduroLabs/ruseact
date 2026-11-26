@@ -10,7 +10,7 @@ Do **not** claim React API compatibility or performance superiority unless tests
 - `crates/ruseact-wasm`: thin, explicit Rust ↔ JS ABI bridge; avoid per-binding crossings.
 - `packages/ruseact`: public TSX API and compiler integration, when implemented.
 - `packages/ruseact-dom`: browser host adapter and event lifecycle, when implemented.
-- `ruseact-examples`: a **separate GitHub repository**. Do not add example applications to this repository.
+- `ruseact-example`: a **separate GitHub repository**. Do not add example applications to this repository.
 
 ## Working rules
 1. Inspect the relevant code and tests before changing behavior; preserve existing repo setup.

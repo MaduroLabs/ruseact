@@ -2,12 +2,14 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readDistributionMetadata } from "./distribution_metadata.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distributionRoot = path.join(repositoryRoot, "target", "distribution");
 const packageBuildRoot = path.join(distributionRoot, "package-build");
 const wasmBuildRoot = path.join(distributionRoot, "wasm");
-const packageVersion = "0.1.0-alpha.0";
+const distributionMetadata = readDistributionMetadata(repositoryRoot);
+const { packageNames, version: packageVersion } = distributionMetadata;
 const tscPath = path.join(repositoryRoot, "node_modules", ".bin", "tsc");
 const wasmInput = path.join(repositoryRoot, "target", "wasm32-unknown-unknown", "release", "ruseact_wasm.wasm");
 
@@ -66,13 +68,12 @@ function compilePackage(name, sourceDirectory, entry, paths = {}) {
 function stageManifest(name) {
   const sourcePath = path.join(repositoryRoot, "packages", name, "package.json");
   const manifest = readJson(sourcePath);
-  if (manifest.version !== packageVersion) {
-    throw new Error(`${name}: package version must be ${packageVersion}`);
-  }
+  if (manifest.version !== packageVersion) throw new Error(`${name}: package version must be ${packageVersion}`);
   if (name === "ruseact-dom") {
     manifest.dependencies = { ...(manifest.dependencies ?? {}), ruseact: packageVersion };
   }
   writeJson(path.join(packageBuildRoot, name, "package.json"), manifest);
+  cpSync(path.join(repositoryRoot, "LICENSE"), path.join(packageBuildRoot, name, "LICENSE"));
 }
 
 function buildWasm() {
@@ -105,7 +106,7 @@ function buildPackages() {
   );
   compilePackage("ruseact-compiler", "packages/ruseact-compiler/src", "packages/ruseact-compiler/src/index.ts");
 
-  for (const name of ["ruseact", "ruseact-dom", "ruseact-compiler"]) {
+  for (const name of packageNames) {
     stageManifest(name);
   }
   cpSync(path.join(wasmBuildRoot, "node"), path.join(packageBuildRoot, "ruseact", "wasm", "node"), { recursive: true });

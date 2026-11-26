@@ -771,7 +771,7 @@ be isolated.
 
 ## 15. Separate example repository handoff
 
-Example applications belong in the separate `ruseact-examples` repository.
+Example applications belong in the separate `ruseact-example` repository.
 M3.1 adds no Counter demo, fixture application, sibling path dependency, or
 example workflow here.
 

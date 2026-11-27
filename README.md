@@ -82,7 +82,7 @@ API compatibility is claimed.
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
 | Compiler integration       | M4.3 intrinsic TSX, M4.4.2 component placement, M4.4.3 conditional transforms, and provisional M4.4.4 keyed syntax implemented |
-| Manual-approval development workflow | Implemented; CI and protected rulesets remain enabled |
+| Manual-approval main-only workflow | Implemented; CI and protected rulesets remain enabled |
 
 ### Currently implemented
 
@@ -772,15 +772,15 @@ RUSEACT_WASM_BINDGEN_OUT=/tmp/ruseact-m2.3-bindgen \
 This verifies the Node/WASM loading path and runtime behavior only. Browser
 bundler compatibility and DOM integration are deferred to M2.4.
 
-## Manual-approval development workflow
+## Manual-approval main-only workflow
 
-Ruseact uses a strictly manual, protected workflow for every development task:
+Ruseact uses a main-only, strictly manual and protected workflow for every
+development task:
 
 ```text
-Task → feature branch from develop → implementation → README update →
-validation → self-review → PR to develop → required CI → human squash merge →
-explicit main-promotion request → verified promotion PR to main →
-human squash merge → return to develop
+Task → feature branch from main → implementation → README update →
+validation → self-review → PR to main → required CI → human squash merge →
+post-merge verification → synchronized main
 ```
 
 Every new implementation task, milestone, and sub-milestone must update this
@@ -794,26 +794,26 @@ The repository provides these workflow components:
 - `Ruseact CI` runs Rust formatting, Clippy, workspace tests, WASM checks,
   TypeScript checks, skill validation, risk classification, and the README
   gate.
-- The former `auto-merge-develop.yml` and `promote-main.yml` workflows are
-  disabled in GitHub Actions and removed from the repository. They have no
-  event-driven merge or promotion authority.
+- Automatic merge and promotion workflows are removed from the repository.
+  They have no event-driven merge or promotion authority.
 
 Use `$ruseact-pr-publish` to validate and publish a feature branch. It commits,
-pushes the feature branch, opens a PR targeting `develop`, records the checked
+pushes the feature branch, opens a PR targeting `main`, records the checked
 SHA, and then stops. Codex must never merge that PR or enable auto-merge.
 
-Use `$ruseact-main-promote` only after explicitly providing the merged PR
-number and confirming that the task is complete. The skill verifies the exact
-single-parent squash SHA, confirms it is the current `origin/develop` tip,
-checks for duplicate promotion, creates a traceable promotion branch and PR to
-`main`, validates it, and stops for the user's manual merge. It never selects
-arbitrary `HEAD`, directly pushes `main`, or enables auto-merge.
+Use `$ruseact-post-merge` after a human has merged an implementation PR and
+explicitly provides its PR number. The skill verifies the repository, `main`
+target, exact squash commit, required CI and merge provenance, synchronizes
+local `main`, and stops. It never creates another PR, cherry-picks, directly
+pushes `main`, deletes branches, or enables auto-merge.
 
-CI and branch protection remain enabled. The active `develop` and `main`
-rulesets require review, squash merging, and the configured `Ruseact CI`
-contexts. Repository native auto-merge is disabled. Any future request to
-re-enable merge or promotion automation requires a separate, explicitly
-approved security and repository-settings change.
+CI and branch protection remain enabled. The active `main` ruleset requires
+review, squash merging, and the configured `Ruseact CI` contexts. Repository
+native auto-merge is disabled. The archived `archive/legacy-main` branch
+preserves the previous promotion history and must not be treated as the active
+development base. Any future request to re-enable merge or promotion
+automation requires a separate, explicitly approved security and repository-
+settings change.
 
 For a failure, preserve local and remote history and record the PR number,
 source squash SHA, source and target branches, resulting main SHA if any,

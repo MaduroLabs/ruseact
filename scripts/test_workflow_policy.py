@@ -9,7 +9,6 @@ from workflow_policy import (
     classify_paths,
     meaningful_readme_patch,
     meaningful_readme_update,
-    promotion_recorded,
     required_approvals_satisfied,
     required_checks_passed,
     summarize_rulesets,
@@ -21,6 +20,11 @@ class WorkflowPolicyTests(unittest.TestCase):
         workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
         self.assertFalse((workflow_dir / "auto-merge-develop.yml").exists())
         self.assertFalse((workflow_dir / "promote-main.yml").exists())
+
+    def test_main_only_skill_replaces_promotion_skill(self) -> None:
+        skills_dir = Path(__file__).resolve().parents[1] / ".agents" / "skills"
+        self.assertFalse((skills_dir / "ruseact-main-promote" / "SKILL.md").exists())
+        self.assertTrue((skills_dir / "ruseact-post-merge" / "SKILL.md").is_file())
 
     def test_high_risk_workflow_and_core_changes_require_review(self) -> None:
         risk, _ = classify_paths([".github/workflows/ci.yml", "crates/ruseact-core/src/lib.rs"])
@@ -76,7 +80,7 @@ class WorkflowPolicyTests(unittest.TestCase):
             [
                 {
                     "enforcement": "active",
-                    "conditions": {"ref_name": {"include": ["refs/heads/develop"]}},
+                    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
                     "rules": [
                         {
                             "type": "pull_request",
@@ -88,7 +92,7 @@ class WorkflowPolicyTests(unittest.TestCase):
                     ],
                 }
             ],
-            "develop",
+            "main",
             "main",
         )
         self.assertTrue(summary["has_pull_request_rule"])
@@ -101,10 +105,10 @@ class WorkflowPolicyTests(unittest.TestCase):
         ]
         self.assertFalse(required_approvals_satisfied(1, reviews))
 
-    def test_promotion_trailer_is_exact_and_idempotent(self) -> None:
-        source = "0123456789abcdef"
-        self.assertTrue(promotion_recorded([f"cherry picked from commit {source}"], source))
-        self.assertFalse(promotion_recorded(["cherry picked from commit another"], source))
+    def test_main_only_push_policy_is_documented_in_ci(self) -> None:
+        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "agent-config-check.yml").read_text()
+        self.assertIn("branches: [main]", workflow)
+        self.assertNotIn("branches: [main, develop]", workflow)
 
 
 if __name__ == "__main__":

@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Mocked GitHub API tests for the manual promotion verifier."""
+"""Mocked GitHub API tests for the main-only manual PR verifier."""
 from __future__ import annotations
 
 from copy import deepcopy
 import unittest
 
-from automation_gate import automatic_merge_blocked, evaluate_promotion
+from automation_gate import automatic_merge_blocked, evaluate_main_pr
 
 
 REPOSITORY = "MaduroLabs/ruseact"
 REPO_PATH = f"/repos/{REPOSITORY}"
 HEAD_SHA = "1111111111111111111111111111111111111111"
-SOURCE_SHA = "2222222222222222222222222222222222222222"
-MAIN_SHA = "3333333333333333333333333333333333333333"
 
 
 class FakeApi:
@@ -22,6 +20,7 @@ class FakeApi:
         self.lists = lists
 
     def get(self, path: str, params: object = None) -> object:
+        del params
         return deepcopy(self.data[path])
 
     def paginated(self, path: str) -> list[dict[str, object]]:
@@ -31,30 +30,25 @@ class FakeApi:
 def make_api(
     *,
     readme: bool = True,
-    high_risk: bool = False,
     required_checks: bool = True,
     check_conclusion: str = "success",
-    develop_sha: str = SOURCE_SHA,
-    parent_count: int = 1,
+    base: str = "main",
+    draft: bool = False,
     main_rules: bool = True,
-    merged: bool = False,
 ) -> FakeApi:
-    files = []
+    files: list[dict[str, object]] = []
     if readme:
         files.append({"filename": "README.md", "patch": "@@ -1 +1 @@\n- old\n+ documented feature capability\n"})
-    if high_risk:
-        files.append({"filename": ".github/workflows/example.yml", "patch": "@@ -0,0 +1 @@\n+name: example\n"})
-    else:
-        files.append({"filename": "docs/feature.md", "patch": "@@ -0,0 +1 @@\n+feature\n"})
+    files.append({"filename": "docs/feature.md", "patch": "@@ -0,0 +1 @@\n+feature\n"})
 
-    develop_rules = [
+    main_rules_list: list[dict[str, object]] = [
         {
             "type": "pull_request",
             "parameters": {"required_approving_review_count": 1, "allowed_merge_methods": ["squash"]},
         }
     ]
     if required_checks:
-        develop_rules.append(
+        main_rules_list.append(
             {
                 "type": "required_status_checks",
                 "parameters": {
@@ -65,99 +59,73 @@ def make_api(
                 },
             }
         )
-    main_rules = deepcopy(develop_rules) if main_rules else []
-    ruleset_summaries = [{"id": 1}, {"id": 2}]
-    ruleset_details = [
-        {
-            "enforcement": "active",
-            "conditions": {"ref_name": {"include": ["refs/heads/develop"]}},
-            "rules": develop_rules,
-        },
-        {
-            "enforcement": "active",
-            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
-            "rules": main_rules,
-        },
-    ]
+
     pr = {
         "number": 8,
-        "state": "closed" if merged else "open",
-        "merged_at": "2026-01-01T00:00:00Z" if merged else None,
-        "merge_commit_sha": SOURCE_SHA if merged else None,
-        "base": {"ref": "develop"},
+        "state": "open",
+        "merged_at": None,
+        "base": {"ref": base},
         "head": {"sha": HEAD_SHA},
-        "draft": False,
-        "mergeable": True,
-        "mergeable_state": "clean",
+        "draft": draft,
     }
-    commit_files = [{"filename": file["filename"]} for file in files]
-    commit = {"parents": [{} for _ in range(parent_count)], "files": commit_files}
     checks = [
         {"name": "README documentation", "status": "completed", "conclusion": check_conclusion},
         {"name": "Rust (ubuntu-latest)", "status": "completed", "conclusion": "success"},
     ]
     data = {
         f"{REPO_PATH}/pulls/8": pr,
-        f"{REPO_PATH}": {"default_branch": "main", "allow_auto_merge": True, "allow_squash_merge": True},
-        f"{REPO_PATH}/rulesets/1": ruleset_details[0],
-        f"{REPO_PATH}/rulesets/2": ruleset_details[1],
+        f"{REPO_PATH}": {"default_branch": "main"},
         f"{REPO_PATH}/commits/{HEAD_SHA}/check-runs": {"check_runs": checks},
-        f"{REPO_PATH}/commits/{SOURCE_SHA}": commit,
-        f"{REPO_PATH}/branches/develop": {"commit": {"sha": develop_sha}},
-        f"{REPO_PATH}/git/ref/heads/main": {"object": {"sha": MAIN_SHA}},
+        f"{REPO_PATH}/rulesets/1": {
+            "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "rules": main_rules_list if main_rules else [],
+        },
     }
     lists = {
         f"{REPO_PATH}/pulls/8/files": files,
-        f"{REPO_PATH}/pulls/8/reviews": [
-            {"user": {"login": "reviewer"}, "state": "APPROVED", "submitted_at": "2026-01-01"}
-        ],
-        f"{REPO_PATH}/rulesets": ruleset_summaries,
+        f"{REPO_PATH}/rulesets": [{"id": 1}],
     }
     return FakeApi(data, lists)
 
 
 class AutomationGateTests(unittest.TestCase):
-    def evaluate_auto(self, api: FakeApi) -> dict[str, object]:
-        del api
+    def test_automatic_merge_is_always_blocked(self) -> None:
         decision: dict[str, object] = {}
         automatic_merge_blocked(decision, [])
-        return decision
-
-    def test_automatic_merge_is_always_blocked(self) -> None:
-        decision = self.evaluate_auto(make_api())
         self.assertEqual(decision["eligible"], "false")
         self.assertIn("automatic PR merging is disabled", decision["reason"])
 
-    def test_verified_squash_promotion_is_eligible_when_main_is_configured(self) -> None:
-        api = make_api(merged=True)
+    def test_main_targeted_pr_is_eligible_for_manual_review(self) -> None:
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
+        evaluate_main_pr(make_api(), 8, decision, [])
         self.assertEqual(decision["eligible"], "true")
+        self.assertEqual(decision["manual_approval_required"], "true")
 
-    def test_newer_develop_commit_blocks_promotion(self) -> None:
-        api = make_api(merged=True, develop_sha="4444444444444444444444444444444444444444")
+    def test_non_main_target_is_rejected(self) -> None:
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
+        evaluate_main_pr(make_api(base="develop"), 8, decision, [])
         self.assertEqual(decision["eligible"], "false")
 
-    def test_non_squash_merge_blocks_promotion(self) -> None:
-        api = make_api(merged=True, parent_count=2)
+    def test_missing_required_checks_rejects_pr(self) -> None:
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
+        evaluate_main_pr(make_api(required_checks=False), 8, decision, [])
         self.assertEqual(decision["eligible"], "false")
 
-    def test_unconfigured_main_blocks_promotion(self) -> None:
-        api = make_api(merged=True, main_rules=False)
+    def test_failed_current_check_rejects_pr(self) -> None:
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [], confirmed=True)
+        evaluate_main_pr(make_api(check_conclusion="failure"), 8, decision, [])
         self.assertEqual(decision["eligible"], "false")
 
-    def test_promotion_requires_explicit_completion_confirmation(self) -> None:
-        api = make_api(merged=True)
+    def test_unconfigured_main_ruleset_rejects_pr(self) -> None:
         decision: dict[str, object] = {}
-        evaluate_promotion(api, 8, SOURCE_SHA, decision, [])
+        evaluate_main_pr(make_api(main_rules=False), 8, decision, [])
         self.assertEqual(decision["eligible"], "false")
-        self.assertIn("explicit completion confirmation", decision["reason"])
+
+    def test_draft_pr_rejects_publication(self) -> None:
+        decision: dict[str, object] = {}
+        evaluate_main_pr(make_api(draft=True), 8, decision, [])
+        self.assertEqual(decision["eligible"], "false")
 
 
 if __name__ == "__main__":

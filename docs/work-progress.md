@@ -2,14 +2,28 @@
 
 ## Branch and baseline
 
-- Branch: `feature/m4.5.1.1-alpha1-distribution`
+- Branch: `chore/main-only-workflow`
 - Framework commit/version consumed by examples: not applicable; examples stay in the separate repository
-- Baseline: `origin/develop` at `3ea3de8f01b2ae7001cf65e5576bcc9046401ce9`
+- Baseline: `origin/main` at `3aadab60fc5e9178af506a5ff98e0c721bf318b1`
 - Last verified on: Linux x86_64, 2026-11-25 for M4.5.1 package
   distribution;
   M4.1 hosted checks and M3.5 hosted browser correctness and benchmark
   integrity passed before this implementation branch;
   M1.1–M1.5, M2.1, M2.2, M2.2.1, M2.3, M2.4, and M2.5 are merged into this baseline
+
+## Main-only GitHub Flow configuration
+
+- [x] Verified the remote branch migration: `origin/main` now points to the
+  former `develop` implementation history at `3aadab60fc5e9178af506a5ff98e0c721bf318b1`.
+- [x] Verified `origin/archive/legacy-main` preserves the former promoted main
+  tip `f8b6b8d9ad9f1c7a2bc87aba7b6926afa5883319`; remote `develop` no longer
+  exists.
+- [x] Preserved the old local `main` pointer at
+  `archive/local-main-before-rename` (`2a0ab7781b6c56fde643bf6bc8ed3f550097209c`)
+  and configured local `main` to track `origin/main`.
+- [x] Updated active instructions, skills, CI policy, and validation tests to
+  use main-only GitHub Flow; historical promotion records below remain
+  provenance and are not active workflow requirements.
 
 ## Completed
 

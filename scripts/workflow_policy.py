@@ -4,7 +4,7 @@
 The CI checks import this module after checking out repository policy. It
 intentionally contains no GitHub or filesystem I/O; that keeps risk
 classification and gate decisions straightforward to test. It does not grant
-merge or promotion authority.
+merge authority.
 """
 from __future__ import annotations
 
@@ -191,13 +191,6 @@ def required_approvals_satisfied(
 ) -> bool:
     states = latest_review_states(reviews)
     return sum(state == "APPROVED" for state in states.values()) >= required_count
-
-
-def promotion_recorded(commit_messages: Iterable[str], source_sha: str) -> bool:
-    """Detect the exact ``git cherry-pick -x`` source trailer."""
-
-    marker = f"cherry picked from commit {source_sha}"
-    return any(marker in message for message in commit_messages)
 
 
 def summarize_rulesets(

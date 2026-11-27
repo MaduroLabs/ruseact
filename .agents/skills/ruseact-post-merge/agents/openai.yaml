@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ruseact Post-Merge"
+  short_description: "Verify a merged main PR and sync local main"
+  default_prompt: "Use $ruseact-post-merge to verify the merged main PR and synchronize local main, then stop."
+policy:
+  allow_implicit_invocation: false

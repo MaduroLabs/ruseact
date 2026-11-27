@@ -2,21 +2,21 @@
 name: ruseact-pr-publish
 description: Validate and publish a Ruseact task with mandatory README maintenance, trusted risk classification, and manual-approval PR publication. Use only when the user explicitly asks to publish a task or create its PR; never merge or promote it.
 ---
-# Publish a reviewed Ruseact feature branch to develop
+# Publish a reviewed Ruseact feature branch to main
 
 ## Scope and authorization
 
 Run only for `MaduroLabs/ruseact` after the user explicitly asks to publish
 the current task or milestone. This skill authorizes a scoped commit, feature
 branch push, and PR creation. It does not authorize merging this task,
-changing repository rulesets, changing Actions permissions, pushing `main`, or
-working in `ruseact-examples`.
+changing repository rulesets, changing Actions permissions, or pushing
+`main` directly.
 
 Ruseact uses a strictly manual merge policy. The former
-`.github/workflows/auto-merge-develop.yml` is disabled and removed. This skill
-never invokes `gh pr merge`, never enables native auto-merge, and never treats
-CI success as merge authorization. Every task stops after opening its PR for
-human review and protected squash merge.
+Automatic merge and promotion workflows are removed. This skill never invokes
+`gh pr merge`, never enables native auto-merge, and never treats CI success as
+merge authorization. Every task stops after opening its PR for human review
+and protected squash merge.
 
 Read `AGENTS.md`, `README.md`, `docs/development-workflow.md`, and relevant
 project documentation before acting. Follow stricter repository rules if they
@@ -29,10 +29,10 @@ exist.
 2. Inspect `git status --short --branch`, the current branch, recent commits,
    unstaged and staged diffs, and any merge/cherry-pick/rebase state. Never
    auto-stash, clean, reset, or discard work.
-3. Require `feature/<milestone>-<description>` based on the latest synchronized
-   `origin/develop`, not `main` or another feature branch. If `develop`
-   advanced after the branch was created, stop and request a safe integration
-   decision rather than silently rebasing or merging.
+3. Require a task branch based on the latest synchronized `origin/main`, not
+   `archive/legacy-main` or another feature branch. If `main` advanced after
+   the branch was created, stop and request a safe integration decision rather
+   than silently rebasing or merging.
 4. Inspect the assigned task and acceptance criteria. Confirm only task-scoped
    files are changed and no secrets, generated WASM, `target`, `node_modules`,
    machine-local paths, or unrelated work are present.
@@ -41,7 +41,7 @@ exist.
    with source and tests, and not a whitespace-only or unrelated touch. Check
    module-specific documentation when applicable.
 6. Run `git fetch origin --prune` and check for an existing open PR for the
-   exact head branch. Reuse a valid PR only when its base is exactly `develop`.
+   exact head branch. Reuse a valid PR only when its base is exactly `main`.
 
 ## Phase B — Local validation and self-review
 
@@ -64,7 +64,7 @@ python3 scripts/validate_readme_update.py --base-sha <BASE_SHA> --head-sha <HEAD
 python3 scripts/classify_changed_files.py --base-sha <BASE_SHA> --head-sha <HEAD_SHA>
 ```
 
-Review `git diff origin/develop...HEAD`, all uncommitted diffs, tests,
+Review `git diff origin/main...HEAD`, all uncommitted diffs, tests,
 dependencies, architecture boundaries, risk, documentation accuracy, and
 potential secret leakage. High-risk paths include `AGENTS.md`,
 `.agents/skills/**`, `.github/**`, Actions permissions, credentials, release
@@ -80,14 +80,14 @@ After validation and self-review:
    README changes together. Do not create an empty commit.
 4. Verify no unexpected remote divergence, then push only the feature branch
    with `git push -u origin <branch>`.
-5. Create a PR targeting `develop` with a structured body containing:
+5. Create a PR targeting `main` with a structured body containing:
    objective, implementation changes, README updates, acceptance criteria,
    commands and results, risk classification, known limitations, head SHA, and
    base SHA.
 6. Record the PR number, URL, head SHA, base SHA, and expected lifecycle state
    `PR_OPEN`/`CI_PENDING`.
 
-The PR must not target `main`. Never push directly to `main`, merge the PR
+The PR must target `main`. Never push directly to `main`, merge the PR
 yourself, bypass branch protection, or change repository settings from this
 skill.
 
@@ -96,11 +96,11 @@ skill.
 Every PR enters `MANUAL_APPROVAL_REQUIRED` after publication, regardless of
 risk classification. Before stopping, verify that:
 
-- the PR targets `develop`, is not a draft, and has no unresolved conflict;
+- the PR targets `main`, is not a draft, and has no unresolved conflict;
 - the current PR head SHA is the SHA that was validated;
 - the meaningful README gate passed and self-review confirms semantic
   relevance;
-- active `develop` rulesets enforce required checks, required reviews, and
+- the active `main` ruleset enforces required checks, required reviews, and
   squash merging; and
 - all required checks passed for the current PR head SHA.
 
@@ -115,9 +115,9 @@ On any failure, report the PR number/URL, source and target branches, head and
 base SHA, risk, failed operation, exact error, and whether a remote write
 completed. Retry only transient API operations with bounded attempts. Do not
 force-push, reset, discard work, weaken CI, bypass rulesets, or select an
-arbitrary `HEAD`. A newer `develop` tip, missing README update, ambiguous
-scope, stale checks, insufficient permission, or branch-protection rejection
-is a stop condition.
+arbitrary `HEAD`. A newer `main` tip, missing README update, ambiguous scope,
+stale checks, insufficient permission, or branch-protection rejection is a stop
+condition.
 
 ## Final report
 

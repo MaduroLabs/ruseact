@@ -11,6 +11,10 @@ if not files:
     print('ERROR: no SKILL.md files found', file=sys.stderr)
     raise SystemExit(1)
 errors = []
+if (folder / 'ruseact-main-promote' / 'SKILL.md').exists():
+    errors.append(f'{folder / "ruseact-main-promote"}: obsolete promotion skill is still active')
+if not (folder / 'ruseact-post-merge' / 'SKILL.md').is_file():
+    errors.append(f'{folder / "ruseact-post-merge" / "SKILL.md"}: required post-merge skill is missing')
 for f in files:
     content = f.read_text(encoding='utf-8')
     match = re.match(r'\A---\n(.*?)\n---\n', content, re.S)

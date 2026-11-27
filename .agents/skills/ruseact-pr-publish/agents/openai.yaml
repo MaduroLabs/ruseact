@@ -1,6 +1,6 @@
 interface:
   display_name: "Ruseact PR Publish"
   short_description: "Validate README, risk, CI gates, and publish a manual-review PR"
-  default_prompt: "Validate and publish this completed Ruseact task with its README update, risk review, and PR targeting develop. Stop after opening the PR; never merge or enable auto-merge."
+  default_prompt: "Validate and publish this completed Ruseact task with its README update, risk review, and PR targeting main. Stop after opening the PR; never merge or enable auto-merge."
 policy:
   allow_implicit_invocation: false

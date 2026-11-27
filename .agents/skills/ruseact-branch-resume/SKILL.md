@@ -1,16 +1,18 @@
 ---
 name: ruseact-branch-resume
-description: Resume work safely on another Ubuntu/macOS machine or switch Git branches in Ruseact or ruseact-examples; fetch remote changes, checkout without losing local work, detect branch-specific toolchains and dev profiles, restore documented progress, and run the right setup, checks, or dev environment.
+description: Resume work safely on another Ubuntu/macOS machine or switch Git branches in Ruseact or ruseact-example; fetch remote changes, checkout without losing local work, detect branch-specific toolchains and dev profiles, restore documented progress, and run the right setup, checks, or dev environment.
 ---
 # Resume a Ruseact branch across machines
 
 Use when the user says they want to "continue", "sync", "fetch", "checkout", "switch machines", "restore current work", or "run this branch's environment". This skill is **not** a GitHub background sync service; the user must have pushed commits from the first machine.
 
 ## Contract
-1. Work **inside the repository requested by the user**. The library and examples repos are separate; never change both implicitly.
+1. Work **inside the repository requested by the user**. The library and `ruseact-example` repos are separate; never change both implicitly.
 2. First report the repository, current branch, `git status --short`, and configured remote. Never silently lose uncommitted, untracked, ignored, or unpublished work. A safe first inspection is `python3 .agents/skills/ruseact-branch-resume/scripts/resume.py status`.
 3. If the target branch is unclear, list available remote/local branches and use the branch the user actually selected; do not guess that `main` is current work.
 4. Fetch from the configured remote and switch **without force**. Only fast-forward a clean branch. If behind/diverged/uncommitted/checked out in another worktree, stop and report exact state. Never automatically `reset --hard`, `clean -fd`, `stash`, force-push, or delete any branch/worktree. Use `git switch` or a new worktree; preserve local commits.
+   For new Ruseact work, the active base is `main` and must be synchronized
+   from `origin/main`; `archive/legacy-main` is historical provenance only.
 5. After checkout, **read the configuration of that checked-out branch**, not a stale configuration from the previous branch. Run `.../resume.py plan [--profile NAME]` and inspect `.ruseact/branch-env.json`, lockfiles, `.nvmrc`, `rust-toolchain.toml`, `package.json`, `Cargo.toml`, `compose.yaml` and `.env.example` where present. Every branch may differ. Validate the selected OS and installed dependencies.
 6. Read `docs/work-progress.md` on that branch if present, `AGENTS.md`, README, open TODOs, recent commits, and relevant issue/PR references. Summarize completed work, outstanding tasks, current commit, tests and the concrete next step. Do not fabricate a progress log when absent.
 7. Review any commands or scripts newly introduced by the branch **before executing**. A Git branch can contain executable scripts. Never expose environment secrets or run unknown remote code blindly.

@@ -29,18 +29,17 @@ Every task is tracked through these states:
 
 `TASK_READY` → `IMPLEMENTING` → `DOCUMENTING` → `VALIDATING` →
 `SELF_REVIEW` → `PR_OPEN` → `CI_PENDING` → `CI_FAILED` or `CI_PASSED` →
-`MANUAL_APPROVAL_REQUIRED` → `MERGED_DEVELOP` → `PROMOTING_MAIN` →
-`PROMOTED_MAIN`.
+`MANUAL_APPROVAL_REQUIRED` → `MERGED_MAIN` → `TASK_COMPLETE`.
 
-`BLOCKED` and `MANUAL_APPROVAL_REQUIRED` are terminal states for the current
-run until the blocking condition is removed or a human explicitly authorizes
-the next action.
+`BLOCKED` and `MANUAL_APPROVAL_REQUIRED` stop the current run until the
+blocking condition is removed or a human explicitly authorizes the next
+action.
 
 Valid transitions and gates:
 
 - `TASK_READY` → `IMPLEMENTING`: the task scope and acceptance criteria are
   known, the worktree is clean, and the task branch starts at the latest
-  `origin/develop`.
+  `origin/main`.
 - `IMPLEMENTING` → `DOCUMENTING`: implementation and task-scoped tests are
   complete enough to describe accurately.
 - `DOCUMENTING` → `VALIDATING`: the root `README.md` and any relevant module
@@ -48,7 +47,7 @@ Valid transitions and gates:
 - `VALIDATING` → `SELF_REVIEW`: all required local checks pass.
 - `SELF_REVIEW` → `PR_OPEN`: the complete diff is reviewed, risk is classified,
   no secrets or unrelated changes are present, and the feature branch is
-  pushed with a PR targeting `develop`.
+  pushed with a PR targeting `main`.
 - `PR_OPEN` → `CI_PENDING`: GitHub has accepted the PR and its head SHA is
   recorded.
 - `CI_PENDING` → `CI_FAILED`: a required check fails, is cancelled, is stale,
@@ -58,32 +57,33 @@ Valid transitions and gates:
   head SHA and the required README gate passed.
 - `CI_PASSED` → `MANUAL_APPROVAL_REQUIRED`: every PR takes this transition.
   CI success never authorizes an agent or workflow to merge. A human must
-  review and squash-merge the PR through GitHub's protected `develop` path.
-- `MANUAL_APPROVAL_REQUIRED` → `MERGED_DEVELOP`: only after the human has
+  review and squash-merge the PR through GitHub's protected `main` path.
+- `MANUAL_APPROVAL_REQUIRED` → `MERGED_MAIN`: only after the human has
   merged the PR and the merge is visible in GitHub. The agent never merges an
   implementation PR and no workflow requests native auto-merge.
-- `MERGED_DEVELOP` → `PROMOTING_MAIN`: only after the user explicitly invokes
-  `$ruseact-main-promote`, provides the exact merged PR number, and confirms
-  that the task is complete. The exact squash SHA must be the current tip of
-  `origin/develop` and must not already be on `main`.
-- `PROMOTING_MAIN` → `PROMOTED_MAIN`: the verified commit passes main
-  validation and is accepted through the configured protected promotion path.
+- `MERGED_MAIN` → `TASK_COMPLETE`: only after the merged PR, exact squash
+  commit, required CI, and repository provenance are independently verified
+  and local `main` is synchronized with `origin/main`.
 - Any failed safety check, ambiguous identity, API outage after bounded retry,
   diverged history, conflict, or missing permission → `BLOCKED`.
-- `PROMOTED_MAIN` returns the checkout to a clean, synchronized `develop` and
-  then awaits the next `TASK_READY`.
+- `TASK_COMPLETE` leaves the checkout on a clean, synchronized `main` and
+  awaits the next `TASK_READY`.
 
 ### Branch creation and implementation
 
-- `develop` is the only permitted starting branch for new implementation tasks.
+- `main` is the starting branch for new implementation tasks.
 - Before starting, inspect the worktree, fetch `origin`, switch to local
-  `develop`, and synchronize it with `git pull --ff-only origin develop`. If
-  local `develop` does not exist, create it from `origin/develop` first.
+  `main`, and synchronize it with `git pull --ff-only origin main`. If local
+  `main` does not exist, create it from `origin/main` first.
 - Every task or sub-milestone uses its own branch from the latest
-  `origin/develop`, named `feature/<milestone>-<description>`.
-- Never create a task branch from `main` or another feature branch.
+  `origin/main`, named `feature/<milestone>-<description>` (or an approved
+  maintenance prefix).
+- Never create a task branch from another feature branch or a stale local
+  branch.
 - Do not start a dependent task until its prerequisite changes are present on
-  `develop`.
+  `main`.
+- `archive/legacy-main` is preserved as historical provenance and must not be
+  deleted by an agent.
 - Keep implementation scope assigned; do not add examples to this repository.
 
 ### Mandatory README maintenance
@@ -112,19 +112,19 @@ For every task:
 3. Run Rust formatting, Clippy, workspace tests, and package-specific checks.
 4. Self-review the complete diff, including README relevance and risk.
 5. Commit the completed changes and push only the feature branch.
-6. Open a PR targeting `develop` with the head SHA, base SHA, acceptance
+6. Open a PR targeting `main` with the head SHA, base SHA, acceptance
    criteria, README summary, checks, risk classification, and limitations.
 7. Wait for enforced CI and review gates. A human must manually squash-merge
    the implementation PR through GitHub. Codex and repository workflows must
    never enable auto-merge or merge the implementation PR.
 
-The former `auto-merge-develop.yml` and `promote-main.yml` workflows are
-disabled in GitHub Actions and removed from the repository. They must not be
-reintroduced as event-driven automation. `ruseact-pr-publish` stops after
-opening the PR. `$ruseact-main-promote` is a manual, user-invoked recovery and
-promotion helper only; it verifies one exact squash SHA, prepares a protected
-promotion PR to `main`, and stops for a human merge. Neither path bypasses
-branch protection or directly updates a protected branch.
+The former automatic merge and promotion workflows are removed from the
+repository and must not be reintroduced. `ruseact-pr-publish` stops after
+opening the implementation PR to `main`. `$ruseact-post-merge` is a manual,
+user-invoked verification helper for an already merged PR; it records the
+exact squash commit, synchronizes local `main`, and opens no further PR. No
+workflow or skill bypasses branch protection or directly updates a protected
+branch.
 
 ### Risk classification and approval
 
@@ -143,23 +143,22 @@ work always requires explicit human approval and includes:
 
 Risk is determined from trusted changed-file inspection and repository policy,
 not from labels alone. This workflow-configuration task is high risk and must
-not auto-merge or auto-promote itself.
+not merge itself or alter branch protection.
 
-### Human approval and main promotion
+### Human approval and post-merge verification
 
 No implementation task pushes directly to `main`, and no agent or workflow
-merges any PR automatically. Promotion requires an actually merged,
-squash-only PR, the exact GitHub merge SHA, a current `origin/develop` tip
-match, duplicate-promotion checks, main validation, and a protected promotion
-PR. If a direct push would bypass branch protection, use the promotion PR path
-and stop for the user's manual merge, or report the blocker. Never force-push,
-rewrite shared history, reset or discard local work, or silently select
-whichever commit happens to be `HEAD`.
+merges any PR automatically. After a human merge, use the post-merge helper
+only with the explicitly supplied PR number. It must verify the repository,
+`main` target, merged state, exact squash commit, required CI and provenance,
+then synchronize local `main`. Never force-push, rewrite shared history, reset
+or discard local work, create a replacement PR, or silently select whichever
+commit happens to be `HEAD`.
 
-After a successful promotion, return to a clean synchronized `develop`. If the
-PR uses a merge commit, rebase merge, multiple ambiguous commits, a stale SHA,
-failed validation, missing required checks, a cherry-pick conflict, an API
-outage, or insufficient permissions, enter `BLOCKED` or
+After successful verification, remain on a clean synchronized `main` and
+report `TASK_COMPLETE`. If the PR uses an unexpected merge strategy, has an
+ambiguous identity, a stale SHA, failed validation, missing required checks,
+an API outage, or insufficient permissions, enter `BLOCKED` or
 `MANUAL_APPROVAL_REQUIRED` and report recovery instructions.
 
 ## Platform

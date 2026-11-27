@@ -1,6 +1,0 @@
-interface:
-  display_name: "Ruseact Main Promote"
-  short_description: "Verify one confirmed squash merge and prepare a manual main PR"
-  default_prompt: "For PR #<NUMBER>, verify my explicit completion confirmation, exact squash SHA, and protected promotion path; open the main promotion PR, then stop. Never merge or enable auto-merge."
-policy:
-  allow_implicit_invocation: false

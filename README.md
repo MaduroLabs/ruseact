@@ -13,6 +13,20 @@ without relying on React Fiber.
 > Ruseact is a research-oriented engineering project, not a production-ready
 > framework or a drop-in replacement for React.
 
+**[Explore the live Ruseact alpha.1 applications](https://ruseact-example.vercel.app/)**
+
+## Examples
+
+The independently maintained consumer applications live in
+[MaduroLabs/ruseact-example](https://github.com/MaduroLabs/ruseact-example) and
+use independently installed Ruseact `0.1.0-alpha.1` packages:
+
+- **Hello World** — mounts a static view after packaged WASM initialization.
+- **Counter** — demonstrates scalar signals, native events, and explicit flushing.
+- **Conditional Playground** — demonstrates lazy conditional regions and nested ownership.
+- **Todo Application** — demonstrates keyed items, retained field updates, and filtering.
+- **Reorderable List** — demonstrates keyed native movement and retained DOM/input state.
+
 ## Why Ruseact?
 
 Modern frontend frameworks make different architectural trade-offs around
@@ -63,7 +77,7 @@ API compatibility is claimed.
 | M4.4.3 — Conditional structural regions | Complete; hosted Chromium verification passed |
 | M4.4.4 — Keyed lists and stable DOM identity | Complete; hosted Chromium and benchmark verification passed |
 | M4.4.5 — Owner-scoped structural identity hardening | Complete; promoted to main |
-| M4.5.1.1 — Alpha.1 distribution refresh | Implemented on the feature branch; PR review pending |
+| M4.5.1.1 — Alpha.1 distribution refresh | Complete; promoted to main |
 | Scheduling and execution   | Not implemented |
 | WASM integration           | M2.3 Node/WASM runtime and M2.4 hosted browser verification complete |
 | DOM renderer               | M3.1 design, M3.2–M3.5 internal path, and M4.2 public static renderer complete |
